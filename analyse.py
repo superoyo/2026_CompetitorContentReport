@@ -81,14 +81,22 @@ SYSTEM = """คุณเป็นนักวางแผนกลยุทธ�
 - keylearning: บทเรียนภาพรวม เขียนให้ "แบรนด์ที่เราดูแล" เท่านั้น มองข้ามทั้งกลุ่ม
   แล้วสรุปว่าแบรนด์เราควรเรียนรู้อะไรจากเดือนนี้"""
 
+# Structured outputs rejects minItems above 1 ("For 'array' type, 'minItems'
+# values other than 0 or 1 are not supported"), so how many of each to write is
+# the prompt's job, not the schema's. The schema still pins the shape, which is
+# the part the dashboard depends on.
+def strings(most):
+    return {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": most}
+
+
 BRAND_SCHEMA = {
     "type": "object",
     "properties": {
         "key": {"type": "string"},
-        "chips": {"type": "array", "items": {"type": "string"}, "minItems": 3, "maxItems": 3},
-        "analysis": {"type": "array", "items": {"type": "string"}, "minItems": 3, "maxItems": 3},
-        "reco": {"type": "array", "items": {"type": "string"}, "minItems": 3, "maxItems": 3},
-        "top3": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 3},
+        "chips": strings(3),
+        "analysis": strings(3),
+        "reco": strings(3),
+        "top3": strings(3),
         "overview": {"type": "string"},
     },
     "required": ["key", "chips", "analysis", "reco", "top3", "overview"],
@@ -105,8 +113,7 @@ SCHEMA = {
                 "key": {"type": "string"},
                 "title": {"type": "string"},
                 "sub": {"type": "string"},
-                "points": {"type": "array", "items": {"type": "string"},
-                           "minItems": 3, "maxItems": 6},
+                "points": strings(6),
             },
             "required": ["key", "title", "sub", "points"],
             "additionalProperties": False,
@@ -115,6 +122,28 @@ SCHEMA = {
     "required": ["brands", "keylearning"],
     "additionalProperties": False,
 }
+
+
+def check_schema(node, path="schema"):
+    """Reject constraints structured outputs will not take, before we send them.
+
+    A schema the API refuses fails the whole step at run time, on the server,
+    for the price of the round trip — and a stubbed test will not notice,
+    because the stub is not the thing doing the validating. Cheaper to state
+    the rule here.
+    """
+    if isinstance(node, dict):
+        if node.get("minItems", 0) > 1:
+            raise ValueError("%s: minItems ต้องเป็น 0 หรือ 1 เท่านั้น (ได้ %s)"
+                             % (path, node["minItems"]))
+        for k, v in node.items():
+            check_schema(v, "%s.%s" % (path, k))
+    elif isinstance(node, list):
+        for i, v in enumerate(node):
+            check_schema(v, "%s[%d]" % (path, i))
+
+
+check_schema(SCHEMA)
 
 
 def caption(text, limit=220):
