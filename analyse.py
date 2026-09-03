@@ -81,22 +81,22 @@ SYSTEM = """คุณเป็นนักวางแผนกลยุทธ�
 - keylearning: บทเรียนภาพรวม เขียนให้ "แบรนด์ที่เราดูแล" เท่านั้น มองข้ามทั้งกลุ่ม
   แล้วสรุปว่าแบรนด์เราควรเรียนรู้อะไรจากเดือนนี้"""
 
-# Structured outputs rejects minItems above 1 ("For 'array' type, 'minItems'
-# values other than 0 or 1 are not supported"), so how many of each to write is
-# the prompt's job, not the schema's. The schema still pins the shape, which is
-# the part the dashboard depends on.
-def strings(most):
-    return {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": most}
+# Structured outputs takes no array constraint beyond minItems 0 or 1 — no
+# maxItems, no lengths, no numeric bounds. How many of each to write is
+# therefore the prompt's job; the schema pins the shape, which is the part the
+# dashboard depends on.
+def strings():
+    return {"type": "array", "items": {"type": "string"}, "minItems": 1}
 
 
 BRAND_SCHEMA = {
     "type": "object",
     "properties": {
         "key": {"type": "string"},
-        "chips": strings(3),
-        "analysis": strings(3),
-        "reco": strings(3),
-        "top3": strings(3),
+        "chips": strings(),
+        "analysis": strings(),
+        "reco": strings(),
+        "top3": strings(),
         "overview": {"type": "string"},
     },
     "required": ["key", "chips", "analysis", "reco", "top3", "overview"],
@@ -113,7 +113,7 @@ SCHEMA = {
                 "key": {"type": "string"},
                 "title": {"type": "string"},
                 "sub": {"type": "string"},
-                "points": strings(6),
+                "points": strings(),
             },
             "required": ["key", "title", "sub", "points"],
             "additionalProperties": False,
@@ -124,18 +124,26 @@ SCHEMA = {
 }
 
 
-def check_schema(node, path="schema"):
-    """Reject constraints structured outputs will not take, before we send them.
+# Constraints structured outputs refuses outright. Worth stating in full rather
+# than adding one per rejection: each one costs a deploy and a failed run to
+# discover, and a stubbed test cannot catch any of them — the stub is not the
+# thing doing the validating.
+BANNED = ("maxItems", "minLength", "maxLength", "minimum", "maximum",
+          "multipleOf", "exclusiveMinimum", "exclusiveMaximum",
+          "minProperties", "maxProperties", "uniqueItems")
 
-    A schema the API refuses fails the whole step at run time, on the server,
-    for the price of the round trip — and a stubbed test will not notice,
-    because the stub is not the thing doing the validating. Cheaper to state
-    the rule here.
-    """
+
+def check_schema(node, path="schema"):
+    """Raise on anything the API will reject, before a request is built."""
     if isinstance(node, dict):
+        for bad in BANNED:
+            if bad in node:
+                raise ValueError("%s: structured outputs ไม่รองรับ %s" % (path, bad))
         if node.get("minItems", 0) > 1:
             raise ValueError("%s: minItems ต้องเป็น 0 หรือ 1 เท่านั้น (ได้ %s)"
                              % (path, node["minItems"]))
+        if node.get("type") == "object" and node.get("additionalProperties") is not False:
+            raise ValueError("%s: object ต้องมี additionalProperties: False" % path)
         for k, v in node.items():
             check_schema(v, "%s.%s" % (path, k))
     elif isinstance(node, list):
@@ -278,11 +286,14 @@ def main():
         k = row.get("key")
         if k not in known:                     # a key we did not ask about
             continue
-        ai[k] = {"chips": row["chips"], "analysis": row["analysis"], "reco": row["reco"]}
-        summary[k] = {"top3": row["top3"], "overview": row["overview"]}
+        # The schema can no longer cap list length, so cap it here — the chip
+        # row and the box labelled "Top 3" are laid out for three.
+        ai[k] = {"chips": row["chips"][:3], "analysis": row["analysis"][:3],
+                 "reco": row["reco"][:3]}
+        summary[k] = {"top3": row["top3"][:3], "overview": row["overview"]}
 
     kl = out.get("keylearning") or {}
-    keylearning = {kl["key"]: {"title": kl["title"], "sub": kl["sub"], "points": kl["points"]}} \
+    keylearning = {kl["key"]: {"title": kl["title"], "sub": kl["sub"], "points": kl["points"][:6]}} \
         if kl.get("key") in known else {}
 
     u = resp.usage
