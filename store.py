@@ -100,6 +100,21 @@ CREATE TABLE IF NOT EXISTS ccr_selection (
 """
 
 
+def ping():
+    """(ok, detail) — a real round trip, not just "the variable is set"."""
+    if not DATABASE_URL:
+        return False, "ยังไม่ได้ตั้ง DATABASE_URL — เก็บลง /tmp ซึ่งหายเมื่อ deploy"
+    if _down:
+        return False, _down
+    try:
+        with _connect() as con:
+            n = con.execute("SELECT count(*) FROM ccr_reports").fetchone()[0]
+        return True, "เชื่อมได้ · เก็บไว้แล้ว %d เดือน" % n
+    except Exception as exc:
+        _degrade(exc)
+        return False, _down
+
+
 def migrate():
     """Idempotent, run at boot. Never raises — a bad DATABASE_URL is a
     degraded site, not a container that will not start.

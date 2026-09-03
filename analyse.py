@@ -149,6 +149,30 @@ def brief(P, month_label):
     return "\n".join(lines)
 
 
+def ping():
+    """Prove the key works, for a fraction of a cent.
+
+    'Is the variable set' is the question that is easy to answer and not worth
+    answering — a typo'd key is set too. This makes the smallest real request
+    the configured model will accept and reports what came back.
+    """
+    if not KEY:
+        return False, "ยังไม่ได้ตั้ง ANTHROPIC_API_KEY"
+    try:
+        import anthropic
+    except ImportError:
+        return False, "เซิร์ฟเวอร์ยังไม่ได้ติดตั้งไลบรารี anthropic"
+    try:
+        r = anthropic.Anthropic(api_key=KEY).messages.create(
+            model=MODEL, max_tokens=16,
+            messages=[{"role": "user", "content": "ตอบว่า ok"}],
+        )
+        used = r.usage.input_tokens + r.usage.output_tokens
+        return True, "%s ตอบกลับแล้ว (ใช้ %d token)" % (MODEL, used)
+    except Exception as exc:
+        return False, "%s: %s" % (MODEL, str(exc)[:160])
+
+
 def main():
     with open(PROCESSED, encoding="utf-8") as f:
         P = json.load(f)

@@ -60,6 +60,17 @@ def _get(path):
         raise AgencyError("ติดต่อ Agency Intelligence ไม่ได้ — %s" % str(exc)[:120])
 
 
+def ping():
+    """(ok, detail) — proves the base URL and service key actually work."""
+    if not configured():
+        return False, "ยังไม่ได้ตั้ง AGENCY_API_BASE / AGENCY_SERVICE_KEY"
+    try:
+        got = groups()
+        return True, "เชื่อมได้ · เห็น %d Product Group" % len(got)
+    except AgencyError as exc:
+        return False, str(exc)
+
+
 def groups():
     """[{id, name, color, logoUrl, facebookBrands}] — groups live in My Job."""
     out = _get("/groups")

@@ -120,6 +120,30 @@ REPORT_MONTH=2026-06 python3 process.py
 REPORT_MONTH=2026-06 python3 build_dashboard.py
 ```
 
+## ตรวจว่าเชื่อมครบหรือยัง
+
+ระบบนี้พึ่งบริการภายนอกสี่ตัว การจะรู้ว่าตั้งค่าครบไหมโดยกดดึงข้อมูลจริง
+มีราคาแพงและช้า — และบอกได้แค่ตัวแรกที่พัง `/api/selftest` ยิงจริงทุกตัวแล้ว
+รายงานทีเดียว
+
+```bash
+curl -s -H "X-Refresh-Key: <REFRESH_KEY ของคุณ>" \
+  https://2026competitorcontentreport-production.up.railway.app/api/selftest
+```
+
+| ตรวจอะไร | วิธีตรวจ | ค่าใช้จ่าย |
+|---|---|---|
+| Postgres | นับแถวใน `ccr_reports` จริง | ฟรี |
+| Agency Intelligence | เรียก `/report-feed/groups` แล้วนับกลุ่มที่เห็น | ฟรี |
+| Apify | เรียก `/users/me` — คืนชื่อบัญชีและแผน | ฟรี |
+| Claude | ส่งข้อความสั้นที่สุดที่โมเดลรับ | ~$0.0001 |
+
+ตั้งใจให้ยิงของจริงทุกตัว ไม่ใช่เช็คว่า "ตัวแปรถูกตั้งไว้ไหม" — คีย์ที่พิมพ์ผิด
+ก็ถือว่าถูกตั้งไว้เหมือนกัน ข้อความที่ได้กลับมาเป็นเหตุผลจริงจากปลายทาง เช่น
+`Apify ปฏิเสธ token (401)` หรือ `password authentication failed`
+
+ต้องมี `X-Refresh-Key` เพราะ endpoint นี้บอกว่าต่ออะไรอยู่บ้าง และเรียก Claude จริง
+
 ## บทวิเคราะห์ — Claude เขียนจากตัวเลขของเดือนนั้น
 
 `analyse.py` เป็นขั้นหนึ่งใน pipeline ส่งตัวเลขจริงของทุกเพจ + แคปชั่น Top 5
@@ -177,6 +201,7 @@ Endpoint ที่ปุ่มเรียก:
 | `GET` | `/api/groups/<id>/months` | เดือนที่มีข้อมูลแล้ว |
 | `POST` | `/api/refresh` | เริ่มงาน (ต้องมี header `X-Refresh-Key`) |
 | `GET` | `/api/status` | สถานะงานปัจจุบัน |
+| `GET` | `/api/selftest` | ตรวจการเชื่อมต่อทุกบริการ (ต้องมี `X-Refresh-Key`) |
 
 > Railway ใช้ filesystem แบบชั่วคราว หน้าเว็บที่ render แล้วจึงเป็นแค่ cache ใน `/tmp`
 > ตัวข้อมูลจริงอยู่ใน Postgres — เปิดเดือนเดิมอีกครั้งจะ render ใหม่จากที่เก็บไว้

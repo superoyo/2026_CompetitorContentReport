@@ -95,6 +95,49 @@ PPTX_MIME = ("application/vnd.openxmlformats-officedocument"
              ".presentationml.presentation")
 
 
+# ------------------------------------------------------------------- self test
+
+def apify_ping():
+    """(ok, detail) — /users/me is free, so this costs nothing to ask."""
+    if not APIFY_TOKEN:
+        return False, "ยังไม่ได้ตั้ง APIFY_TOKEN"
+    try:
+        req = urllib.request.Request(
+            "https://api.apify.com/v2/users/me",
+            headers={"Authorization": "Bearer %s" % APIFY_TOKEN})
+        with urllib.request.urlopen(req, timeout=20) as r:
+            me = json.loads(r.read().decode()).get("data") or {}
+        plan = (me.get("plan") or {}).get("id") or "ไม่ทราบแผน"
+        return True, "เชื่อมได้ · บัญชี %s · แผน %s" % (me.get("username") or "?", plan)
+    except urllib.error.HTTPError as exc:
+        if exc.code == 401:
+            return False, "Apify ปฏิเสธ token (401) — ไม่ถูกต้องหรือหมดอายุ"
+        return False, "Apify ตอบ %d" % exc.code
+    except Exception as exc:
+        return False, "ติดต่อ Apify ไม่ได้ — %s" % str(exc)[:120]
+
+
+def selftest():
+    """Every outside dependency, each actually exercised.
+
+    The point is to answer "is it wired up?" without running the pipeline —
+    a full run costs Apify credit, takes minutes, and tells you about only
+    the first thing that broke.
+    """
+    import analyse
+    checks = [
+        ("database", "Postgres (เก็บเดือนที่ดึงแล้ว)", store.ping()),
+        ("agency", "Agency Intelligence (รายชื่อกลุ่ม/แบรนด์)", agency_api.ping()),
+        ("apify", "Apify (ดึงโพสต์)", apify_ping()),
+        ("analysis", "Claude (เขียนบทวิเคราะห์)", analyse.ping()),
+    ]
+    return {
+        "ok": all(ok for _, _, (ok, _) in checks),
+        "checks": [{"id": i, "name": n, "ok": ok, "detail": d}
+                   for i, n, (ok, d) in checks],
+    }
+
+
 # ------------------------------------------------------------------ page cache
 
 def _page_path(group, month):
@@ -406,6 +449,15 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self._json(200, {"months": store.months(group),
                              "durable": store.available(),
                              "storage_note": store.why_unavailable()})
+            return
+
+        if route.endswith("/api/selftest"):
+            # Behind the shared secret: it names the services and makes a real
+            # (tiny) Claude call, neither of which a passer-by should trigger.
+            if not self._authorised():
+                self._json(401, {"error": "ต้องส่ง header X-Refresh-Key ให้ถูกต้อง"})
+                return
+            self._json(200, selftest())
             return
 
         if route.endswith("/api/pptx"):
