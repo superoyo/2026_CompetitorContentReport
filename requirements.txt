@@ -1,2 +1,4 @@
 # process.py resizes downloaded post images
 Pillow>=10.0
+# build_slides.py writes the PPTX deck
+python-pptx>=0.6.23

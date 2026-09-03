@@ -290,6 +290,27 @@ HTML = r'''<!DOCTYPE html>
   .mp-note{font-size:10.5px;color:#7A8694;font-family:var(--head);margin-top:11px;line-height:1.45}
   @media(max-width:640px){.head-right{justify-content:flex-start}.rf-msg{text-align:left;max-width:100%}
     .mp-pop{right:auto;left:0}}
+  .pt-btn{font-family:var(--head);font-size:13px;font-weight:700;color:#0B7B57;background:#E8F7F0;
+    border:1px solid #BEE9D8;padding:10px 16px;border-radius:999px;cursor:pointer;display:flex;
+    align-items:center;gap:7px;box-shadow:var(--shadow);white-space:nowrap;transition:.15s;text-decoration:none}
+  .pt-btn:hover{background:#D8F1E6;border-color:#0B7B57;transform:translateY(-1px)}
+  .pt-btn.off{background:#F1F3F6;border-color:var(--line);color:#9AA5B1;cursor:not-allowed;transform:none}
+  /* cost box */
+  .cost-box .cost-top{display:flex;flex-wrap:wrap;gap:22px;align-items:center;margin:16px 0 18px}
+  .cost-big{font-family:var(--head);font-size:38px;font-weight:800;color:#0B2545;line-height:1}
+  .cost-big small{display:block;font-size:12px;font-weight:600;color:#7A8694;margin-top:6px;letter-spacing:.2px}
+  .cost-brk{flex:1;min-width:260px}
+  .cost-t{width:100%;border-collapse:collapse;font-size:12.5px}
+  .cost-t th,.cost-t td{padding:7px 10px;text-align:right;border-bottom:1px solid var(--line)}
+  .cost-t th:first-child,.cost-t td:first-child{text-align:left}
+  .cost-t thead th{font-family:var(--head);font-size:11px;font-weight:800;color:#7A8694;letter-spacing:.3px;
+    text-transform:uppercase;border-bottom:1.5px solid var(--line)}
+  .cost-t tbody tr:last-child td{border-bottom:none}
+  .cost-t .mine{background:#FFF8E8;font-weight:800}
+  .cost-t code{font-size:11.5px;color:#5A6675}
+  .cost-warn{background:#FFF6E5;border:1px solid #F6E2BE;border-radius:11px;padding:12px 14px;
+    font-size:12px;color:#7A5A22;line-height:1.6;margin-top:14px}
+  .cost-warn b{color:#9A5B00}
 </style>
 </head>
 <body>
@@ -317,6 +338,9 @@ HTML = r'''<!DOCTYPE html>
               <div class="mp-note">เลือกเดือน แล้วกดปุ่มโหลดข้อมูลใหม่ · เดือนที่ยังไม่มาถึงจะกดไม่ได้</div>
             </div>
           </div>
+          <a id="pptBtn" class="pt-btn" href="__PPT_FILE__" download>
+            <span>⬇</span><span id="pptLbl">ดาวน์โหลด PPT</span>
+          </a>
           <button id="refreshBtn" class="rf-btn" type="button">
             <span class="rf-sp"></span><span class="rf-lbl">โหลดข้อมูลใหม่</span>
           </button>
@@ -368,6 +392,13 @@ HTML = r'''<!DOCTYPE html>
   </div>
 
   <div id="klWrap"></div>
+
+  <div class="card cost-box">
+    <h2>ค่าใช้จ่ายต่อการกดโหลดข้อมูล 1 ครั้ง</h2>
+    <div class="hint">Actor <code>apify/facebook-posts-scraper</code> คิดเงินแบบ pay-per-event
+      (ราคาดึงจาก Apify API เมื่อ 3 ก.ย. 2569) &middot; ประเมินจากจำนวนโพสต์ที่ดึงได้จริงในเดือนนี้</div>
+    <div id="costBody"></div>
+  </div>
 
   <div class="foot-note">
     <b>หมายเหตุ:</b> ข้อมูลดึงจากโพสต์สาธารณะบนเพจ Facebook ผ่านเครื่องมือสแครปข้อมูล (Apify) ไม่ใช่ตัวเลขจาก Facebook Page Insights โดยตรง &middot;
@@ -714,6 +745,68 @@ tabsEl.addEventListener('click',e=>{
     });
   });
 })();
+
+  /* ---------- PPTX download ---------- */
+  (function(){
+    var a=document.getElementById('pptBtn'); if(!a) return;
+    var href=a.getAttribute('href')||'';
+    /* Probe so a missing deck shows as unavailable instead of a 404 page. */
+    fetch(href,{method:'HEAD'}).then(function(r){
+      if(!r.ok) throw new Error('missing');
+      var kb=parseInt(r.headers.get('Content-Length')||'0',10);
+      if(kb) document.getElementById('pptLbl').textContent=
+        'ดาวน์โหลด PPT ('+(kb/1048576).toFixed(1)+' MB)';
+    })['catch'](function(){
+      a.classList.add('off');
+      a.removeAttribute('href');
+      a.removeAttribute('download');
+      document.getElementById('pptLbl').textContent='ยังไม่มีไฟล์ PPT';
+      a.title='ไฟล์สไลด์ของเดือนนี้ยังไม่ถูกสร้าง — กดโหลดข้อมูลใหม่เพื่อสร้าง';
+    });
+  })();
+
+  /* ---------- Apify cost estimate ---------- */
+  (function(){
+    var host=document.getElementById('costBody'); if(!host) return;
+    var N=DATA.total_posts||0;
+    var START=0.001;                     // actor-start, flat, every tier
+    var THB=33;                          // assumed FX rate, stated in the note
+    /* [tier, $/post, $/post for the date-filter add-on] */
+    var T=[['FREE',0.005,0.002],['BRONZE',0.004,0.001],['SILVER',0.0025,0.0008],
+           ['GOLD',0.002,0.0006],['PLATINUM',0.0016,0.0004],['DIAMOND',0.0008,0.0002]];
+    /* keep sub-cent rows readable: $0.001 must not render as $0.00 */
+    function money(v){return '$'+(v<0.01 ? v.toFixed(3) : v.toFixed(2));}
+    var free=T[0], freeTotal=START+N*free[1]+N*free[2];
+
+    var brk='<table class="cost-t"><thead><tr><th>รายการ</th><th>สูตร</th><th>ราคา</th></tr></thead><tbody>'
+      +'<tr><td>เริ่มรัน actor</td><td><code>คิดครั้งเดียว</code></td><td>'+money(START)+'</td></tr>'
+      +'<tr><td>โพสต์ที่ดึงได้</td><td><code>'+N+' × $'+free[1].toFixed(4)+'</code></td><td>'+money(N*free[1])+'</td></tr>'
+      +'<tr><td>ตัวกรองช่วงวันที่</td><td><code>'+N+' × $'+free[2].toFixed(4)+'</code></td><td>'+money(N*free[2])+'</td></tr>'
+      +'</tbody></table>';
+
+    var tiers='<table class="cost-t"><thead><tr><th>แผน Apify</th><th>ต่อโพสต์</th>'
+      +'<th>ต่อครั้ง ('+N+' โพสต์)</th><th>ถ้าเดือนละครั้ง (ต่อปี)</th></tr></thead><tbody>';
+    for(var i=0;i<T.length;i++){
+      var t=T[i], per=START+N*t[1]+N*t[2];
+      tiers+='<tr'+(i===0?' class="mine"':'')+'><td>'+t[0]+(i===0?' (ค่าเริ่มต้น)':'')+'</td>'
+        +'<td><code>$'+(t[1]+t[2]).toFixed(4)+'</code></td><td>'+money(per)+'</td>'
+        +'<td>'+money(per*12)+'</td></tr>';
+    }
+    tiers+='</tbody></table>';
+
+    host.innerHTML='<div class="cost-top">'
+      +'<div class="cost-big">≈ '+money(freeTotal)
+      +'<small>≈ '+Math.round(freeTotal*THB)+' บาท &middot; แผน FREE &middot; '+N+' โพสต์</small></div>'
+      +'<div class="cost-brk">'+brk+'</div></div>'
+      +tiers
+      +'<div class="cost-warn"><b>อ่านก่อนใช้:</b> ตัวเลขนี้เป็นการประเมิน ไม่ใช่ยอดที่เรียกเก็บจริง &middot; '
+      +'แถวไฮไลต์คือแผน FREE ซึ่งเป็นค่าเริ่มต้น หากบัญชีอยู่แผนสูงกว่าจะถูกลงได้ถึง 7 เท่า '
+      +'(ดูแผนจริงที่ Apify Console &rarr; Billing) &middot; '
+      +'Apify ระบุว่าค่าตัวกรองวันที่คิด<b>ต่อโพสต์ที่ scrape</b> ไม่ใช่ต่อโพสต์ที่ได้กลับมา '
+      +'ยอดจริงจึงอาจสูงกว่านี้เพราะ actor ต้องไล่โพสต์ที่อยู่นอกช่วงวันที่ด้วย &middot; '
+      +'ค่าใช้จ่ายเกิดที่ขั้น scrape เท่านั้น ขั้นประมวลผล/สร้างสไลด์/สร้างหน้าเว็บ ไม่มีค่า Apify &middot; '
+      +'อัตราแลกเปลี่ยนใช้ 33 บาท/USD โดยประมาณ</div>';
+  })();
 </script>
 </body>
 </html>'''
@@ -721,7 +814,8 @@ tabsEl.addEventListener('click',e=>{
 html = HTML.replace('__DATA__', data_json)
 for token, value in (('__M_TH__', M['th_full']), ('__M_ABBR__', M['th_abbr']),
                      ('__M_BE__', str(M['be_year'])), ('__M_EN__', M['en_label']),
-                     ('__M_DAYS__', str(M['days'])), ('__M_ISO__', M['iso'])):
+                     ('__M_DAYS__', str(M['days'])), ('__M_ISO__', M['iso']),
+                     ('__PPT_FILE__', '%s_%d_Engagement_Top5.pptx' % (M['en_full'], M['year']))):
     html = html.replace(token, value)
 # index.html is the site homepage served by GitHub / Railway
 out = os.path.join(ROOT, "index.html")

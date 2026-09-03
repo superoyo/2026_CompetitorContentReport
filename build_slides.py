@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 import json, os
+
+import month_util
 from pptx import Presentation
 from pptx.util import Inches, Pt
 from pptx.dml.color import RGBColor
@@ -39,7 +41,9 @@ def tint(h, factor=0.90):
 SLIDE_W = Inches(13.333)
 SLIDE_H = Inches(7.5)
 
-P = json.load(open('/tmp/processed_8.json'))
+ROOT = os.path.dirname(os.path.abspath(__file__))
+M = month_util.info()
+P = json.load(open(os.environ.get('PROCESSED_JSON', '/tmp/processed_8.json')))
 AGG = P['agg']; MET = P['metrics']; TOP5 = P['top5']
 
 NAME = {b[0]: b[1] for b in BRANDS}
@@ -140,7 +144,7 @@ add_ring(s, 13.7, -0.3, 2.6, RING, 1.6); add_ring(s, 13.0, 0.7, 1.1, RING, 1.6);
 add_rect(s, 1.0, 2.05, 0.9, 0.09, fill=ACCENT)
 add_text(s, 1.0, 2.25, 11.3, 0.5, "รายงานสรุป Engagement บน Facebook", size=19, color=hx('#9FC9DE'), bold=True, font=HEAD_FONT)
 add_text(s, 1.0, 2.72, 11.5, 1.3, "Top 5 คอนเทนต์ยอด Engagement สูงสุด", size=42, color=WHITE, bold=True, font=HEAD_FONT)
-add_text(s, 1.0, 3.7, 11.3, 0.6, "ประจำเดือนพฤษภาคม 2569  (May 2026)  ·  8 เพจ", size=19, color=hx('#CFE7F0'), font=HEAD_FONT)
+add_text(s, 1.0, 3.7, 11.3, 0.6, "ประจำเดือน%s %d  (%s)  ·  8 เพจ" % (M["th_full"], M["be_year"], M["en_label"]), size=19, color=hx('#CFE7F0'), font=HEAD_FONT)
 
 bx, by = 1.0, 4.75
 for key in [b[0] for b in BRANDS]:
@@ -152,7 +156,7 @@ add_text(s, 1.0, 6.9, 9.0, 0.4, "ข้อมูลจากโพสต์ส�
 
 # ============ Slide 2: Overview ============
 s = add_slide(); set_bg(s, WHITE)
-add_text(s, 0.6, 0.42, 10, 0.6, "ภาพรวม Engagement เดือนพฤษภาคม 2569", size=27, color=hx('#0B2545'), bold=True, font=HEAD_FONT)
+add_text(s, 0.6, 0.42, 10, 0.6, "ภาพรวม Engagement เดือน%s %d" % (M["th_full"], M["be_year"]), size=27, color=hx('#0B2545'), bold=True, font=HEAD_FONT)
 add_text(s, 0.6, 1.0, 10, 0.4, "เปรียบเทียบยอด Engagement รวม (Likes + Comments + Shares) ทั้ง 8 เพจ", size=13, color=MUTED)
 
 grand = sum(AGG[k]['total'] for k in AGG)
@@ -199,7 +203,7 @@ for key in ORDER:
     s = add_slide(); set_bg(s, WHITE)
     add_badge(s, 0.6, 0.42, 0.55, c, LETTER[key], fs=20)
     add_text(s, 1.32, 0.4, 8.6, 0.5, display, size=24, color=hx('#0B2545'), bold=True, font=HEAD_FONT)
-    add_text(s, 1.32, 0.92, 8.6, 0.4, "Top 5 คอนเทนต์ Engagement สูงสุด — พฤษภาคม 2569", size=12.5, color=MUTED)
+    add_text(s, 1.32, 0.92, 8.6, 0.4, "Top 5 คอนเทนต์ Engagement สูงสุด — %s %d" % (M["th_full"], M["be_year"]), size=12.5, color=MUTED)
     add_rect(s, 10.45, 0.35, 2.3, 1.05, fill=tint(COLOR[key], 0.86), radius=0.16, shadow=True)
     add_text(s, 10.45, 0.46, 2.3, 0.46, fmt(v['total']), size=22, color=c, bold=True, align=PP_ALIGN.CENTER, font=HEAD_FONT)
     add_text(s, 10.45, 0.94, 2.3, 0.34, f"Total Engagement · {v['posts']} โพสต์", size=9, color=MUTED, align=PP_ALIGN.CENTER)
@@ -276,7 +280,8 @@ add_rect(s, 1.0, 1.72, 0.75, 0.06, fill=ACCENT)
 notes = [
     "ข้อมูลดึงจากโพสต์สาธารณะบนเพจ Facebook ผ่านเครื่องมือสแครปข้อมูล (Apify) ไม่ใช่ตัวเลขจาก Facebook Page Insights โดยตรง",
     "Engagement นับจาก Likes/Reactions + Comments + Shares ของแต่ละโพสต์ ไม่รวม Reach, Impressions หรือ Click ซึ่งดูได้จาก Insights เท่านั้น",
-    "ช่วงข้อมูล: 1–31 พฤษภาคม 2569 (May 2026) · จำนวนโพสต์ที่ดึงได้ต่อเพจอาจต่างกันตามความถี่การโพสต์จริง",
+    "ช่วงข้อมูล: 1–%d %s %d (%s) · จำนวนโพสต์ที่ดึงได้ต่อเพจอาจต่างกันตามความถี่การโพสต์จริง"
+    % (M["days"], M["th_full"], M["be_year"], M["en_label"]),
     "เพจที่มีจำนวนโพสต์น้อย ตัวเลขจึงสะท้อนช่วงตัวอย่างที่จำกัด",
 ]
 y = 2.25
@@ -285,6 +290,7 @@ for n in notes:
     add_text(s, 1.35, y - 0.06, 10.8, 0.9, n, size=14, color=hx('#E3EEF4'), ls=1.15)
     y += 1.02
 
-out = "/Users/parndoungjai/Desktop/claude jun 18/May_2026_Engagement_Top5.pptx"
+# Name the deck after the month; build_dashboard.py links the download button here.
+out = os.path.join(ROOT, "%s_%d_Engagement_Top5.pptx" % (M["en_full"], M["year"]))
 prs.save(out)
 print("saved", out, "slides:", len(prs.slides._sldIdLst))
