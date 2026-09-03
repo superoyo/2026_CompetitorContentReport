@@ -248,6 +248,18 @@ HTML = r'''<!DOCTYPE html>
   .pos{color:#16A34A}.neg{color:#DC2626}
   .pill{display:inline-block;padding:3px 11px;border-radius:999px;font-family:var(--head);font-weight:800;font-size:12.5px}
   @media(max-width:1100px){.kpis{grid-template-columns:repeat(2,1fr)}.grid{grid-template-columns:1fr}.posts{grid-template-columns:repeat(2,1fr)}}
+  .head-right{display:flex;align-items:center;gap:12px;flex-wrap:wrap;justify-content:flex-end}
+  .rf-wrap{display:flex;flex-direction:column;align-items:flex-end;gap:5px}
+  .rf-btn{font-family:var(--head);font-size:13px;font-weight:700;color:#fff;background:#1877F2;border:none;
+    padding:10px 18px;border-radius:999px;cursor:pointer;display:flex;align-items:center;gap:8px;
+    box-shadow:var(--shadow);transition:.15s;white-space:nowrap}
+  .rf-btn:hover:not(:disabled){filter:brightness(1.08);transform:translateY(-1px)}
+  .rf-btn:disabled{background:#C9D2DC;cursor:not-allowed;transform:none}
+  .rf-btn .rf-sp{width:13px;height:13px;border:2px solid rgba(255,255,255,.35);border-top-color:#fff;
+    border-radius:50%;animation:rfspin .7s linear infinite;display:none;flex:none}
+  .rf-btn.busy .rf-sp{display:block}
+  @keyframes rfspin{to{transform:rotate(360deg)}}
+  .rf-msg{font-size:11.5px;color:#7A8694;font-family:var(--head);max-width:280px;text-align:right;line-height:1.45}
 </style>
 </head>
 <body>
@@ -256,7 +268,15 @@ HTML = r'''<!DOCTYPE html>
       <h1>Facebook Engagement Dashboard</h1>
       <div class="sub">สรุปยอด Engagement 8 เพจ — ประจำเดือนพฤษภาคม 2569 (May 2026)</div>
     </div>
-    <div class="badge">1–31 พ.ค. 2569</div>
+    <div class="head-right">
+      <div class="badge">1–31 พ.ค. 2569</div>
+      <div class="rf-wrap">
+        <button id="refreshBtn" class="rf-btn" type="button">
+          <span class="rf-sp"></span><span class="rf-lbl">โหลดข้อมูลใหม่</span>
+        </button>
+        <div class="rf-msg" id="rfMsg"></div>
+      </div>
+    </div>
   </div>
 
   <div class="mo-card" id="moCard"></div>
@@ -515,6 +535,77 @@ tabsEl.addEventListener('click',e=>{
   t.style.background = DATA.brands.find(b=>b.key===t.dataset.key).color;
   selectPage(t.dataset.key);
 });
+</script>
+<script>
+/* Refresh button: asks the server to re-run the Apify pipeline, then polls
+   /api/status until the run ends and reloads to show the new dashboard.
+   The Apify token lives only on the server; the page never sees it. */
+(function(){
+  var btn=document.getElementById('refreshBtn'), msg=document.getElementById('rfMsg');
+  if(!btn) return;
+  var SK='fbdash_refresh_key', timer=null;
+
+  function label(t){btn.querySelector('.rf-lbl').textContent=t;}
+  function busy(on){btn.classList.toggle('busy',on);btn.disabled=on;}
+  function say(t){msg.textContent=t||'';}
+
+  function status(){
+    return fetch('api/status',{cache:'no-store'}).then(function(r){
+      if(!r.ok) throw new Error('http '+r.status);
+      return r.json();
+    });
+  }
+
+  function track(){
+    label('กำลังโหลดข้อมูล…'); busy(true);
+    clearInterval(timer);
+    timer=setInterval(function(){
+      status().then(function(s){
+        if(s.step) say(s.step+' — อาจใช้เวลาหลายนาที');
+        if(!s.running){
+          clearInterval(timer);
+          if(s.error){busy(false);label('โหลดข้อมูลใหม่');say('ผิดพลาด: '+s.error);}
+          else{label('เสร็จแล้ว กำลังรีเฟรช…');say('');setTimeout(function(){location.reload();},800);}
+        }
+      })['catch'](function(){
+        clearInterval(timer);busy(false);label('โหลดข้อมูลใหม่');say('ขาดการเชื่อมต่อเซิร์ฟเวอร์');
+      });
+    },5000);
+  }
+
+  /* Probe on load: a static host (GitHub Pages, or opening the file directly)
+     has no API, so the button is disabled with an explanation. */
+  status().then(function(s){
+    if(s.running){track();return;}
+    if(!s.configured){btn.disabled=true;say('เซิร์ฟเวอร์ยังไม่ได้ตั้งค่า APIFY_TOKEN');return;}
+    if(s.last_finished) say('อัปเดตล่าสุด '+s.last_finished);
+  })['catch'](function(){
+    btn.disabled=true;
+    say('หน้านี้เป็นไฟล์นิ่ง — กดโหลดข้อมูลใหม่ได้บนเว็บที่รันบน Railway');
+  });
+
+  btn.addEventListener('click',function(){
+    var k=sessionStorage.getItem(SK);
+    if(!k){
+      k=prompt('ใส่ Refresh key (ค่าเดียวกับตัวแปร REFRESH_KEY บนเซิร์ฟเวอร์)');
+      if(!k) return;
+      sessionStorage.setItem(SK,k);
+    }
+    label('กำลังเริ่ม…'); busy(true); say('');
+    fetch('api/refresh',{method:'POST',headers:{'X-Refresh-Key':k}}).then(function(r){
+      if(r.status===409){track();return;}
+      if(r.status===401){sessionStorage.removeItem(SK);busy(false);label('โหลดข้อมูลใหม่');say('Refresh key ไม่ถูกต้อง ลองอีกครั้ง');return;}
+      if(!r.ok){
+        return r.json()['catch'](function(){return {};}).then(function(j){
+          busy(false);label('โหลดข้อมูลใหม่');say(j.error||('เริ่มงานไม่สำเร็จ ('+r.status+')'));
+        });
+      }
+      track();
+    })['catch'](function(){
+      busy(false);label('โหลดข้อมูลใหม่');say('เชื่อมต่อเซิร์ฟเวอร์ไม่ได้');
+    });
+  });
+})();
 </script>
 </body>
 </html>'''

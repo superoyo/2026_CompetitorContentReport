@@ -1,1 +1,2 @@
-# no third-party dependencies - server.py uses the standard library only
+# process.py resizes downloaded post images
+Pillow>=10.0
