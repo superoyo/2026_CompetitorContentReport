@@ -2,6 +2,7 @@
 import json, os
 
 import brandset
+import report_config
 import month_util
 from pptx import Presentation
 from pptx.util import Inches, Pt
@@ -11,7 +12,7 @@ from pptx.enum.shapes import MSO_SHAPE
 from pptx.chart.data import CategoryChartData
 from pptx.enum.chart import XL_CHART_TYPE
 from pptx.oxml.ns import qn
-from report_config import ANALYSIS
+from report_config import ANALYSIS as AUTHORED_ANALYSIS
 
 # ---------- palette ----------
 DARK = RGBColor(0x0B, 0x14, 0x22)
@@ -50,6 +51,11 @@ AGG = P['agg']; MET = P['metrics']; TOP5 = P['top5']
 # The set the run actually covered, recorded by process.py. Falling back to
 # brandset.load() keeps a hand-run of this step working against older output.
 BRANDS = P.get('brands') or brandset.load()
+# Commentary analyse.py wrote for this run; the hand-written prose in
+# report_config only applies to the month it was written for.
+_GEN = P.get('analysis') or {}
+ANALYSIS = _GEN.get('ai') if _GEN else (
+    AUTHORED_ANALYSIS if M['iso'] == report_config.AUTHORED_MONTH else {})
 NAME = {b['key']: b['name'] for b in BRANDS}
 LETTER = {b['key']: b['letter'] for b in BRANDS}
 COLOR = {b['key']: b['color'] for b in BRANDS}

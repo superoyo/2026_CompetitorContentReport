@@ -122,6 +122,8 @@ def build():
         } for p in lst]
 
     AVATARS = P.get('avatars') or {}
+    # What analyse.py wrote for this run, if the step got as far as writing it.
+    GEN = P.get('analysis') or {}
 
     def logo_b64(key):
         # The page's own profile picture, scraped with the posts, is the real
@@ -161,8 +163,14 @@ def build():
         'brands': [{'key': b['key'], 'name': b['name'], 'letter': b['letter'], 'color': b['color']} for b in BRANDS],
         'mo': metrics_overview, 'mo_max': mo_max,
         'agg': AGG, 'days': all_days, 'daily': daily_series, 'top5': top5_out,
-        'all': all_out, 'metrics': MET, 'ai': ANALYSIS, 'summary': CONTENT_SUMMARY,
-        'keylearning': KEY_LEARNING,
+        'all': all_out, 'metrics': MET,
+        'ai': GEN.get('ai', ANALYSIS),
+        'summary': GEN.get('summary', CONTENT_SUMMARY),
+        'keylearning': GEN.get('keylearning', KEY_LEARNING),
+        # 'generated' was written for this exact group and month, so the render
+        # step passes it through; 'authored' is the hand-written May/PAO prose
+        # and has to be checked against the report before it is shown.
+        'analysis_source': 'generated' if GEN else 'authored',
         'grand_total': sum(AGG[k]['total'] for k in AGG),
         'total_posts': sum(AGG[k]['posts'] for k in AGG),
     }

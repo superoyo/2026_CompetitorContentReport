@@ -6,3 +6,6 @@ python-pptx>=0.6.23
 # a deploy, and the month picker has to know what has already been fetched
 psycopg[binary]>=3.1
 psycopg_pool>=3.2
+# analyse.py asks Claude to write the report's commentary from the scraped month
+# (0.125 is where output_config lands; there is no 1.x on PyPI yet)
+anthropic>=0.125

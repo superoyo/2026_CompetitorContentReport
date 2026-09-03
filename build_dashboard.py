@@ -34,7 +34,12 @@ else:
 # Shokubutsu's name; in another month it is quietly out of date. Filter it here,
 # at render, rather than where the payload is built — a month stored before this
 # existed then comes out clean too, with no second trip to Apify.
+#
+# Commentary written by analyse.py for this very group and month is exempt —
+# it cannot be about the wrong report.
 def _authored(block):
+    if DATA.get('analysis_source') == 'generated':
+        return block or {}
     if M['iso'] != report_config.AUTHORED_MONTH:
         return {}
     keys = {b.get('key') for b in (DATA.get('brands') or [])}
