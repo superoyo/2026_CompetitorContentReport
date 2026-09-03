@@ -137,17 +137,31 @@ def drop_cached_page(group, month):
 
 # ---------------------------------------------------------------------- brands
 
+def effective_selection(group, available):
+    """The ticked keys that still mean something, or None to mean "all of them".
+
+    A saved tick list can stop matching: a brand is deleted in Agency
+    Intelligence, or the key it derives from changes shape. Dropping the ones
+    that no longer resolve is right — they are rows the pipeline could never
+    fill. Dropping *every* one is not: that silently leaves the group with no
+    brands at all, so treat a wholly stale list as if it had never been saved.
+    """
+    picked = store.load_selection(group)
+    if picked is None:
+        return None
+    keys = {b.get("key") for b in available}
+    live = [k for k in picked if k in keys]
+    return live or None
+
+
 def selected_brands(group):
     """The brands a refresh would cover: what was ticked, else all of them."""
     available = agency_api.brands(group)
-    picked = store.load_selection(group)
-    if picked is None:
+    live = effective_selection(group, available)
+    if live is None:
         return brandset.normalise(available)
-    keep = set(picked)
-    chosen = [b for b in available if b.get("key") in keep]
-    # A brand deleted in Agency Intelligence since the tick disappears here
-    # rather than lingering as a row the pipeline can never fill.
-    return brandset.normalise(chosen)
+    keep = set(live)
+    return brandset.normalise([b for b in available if b.get("key") in keep])
 
 
 # ----------------------------------------------------------------------- decks
@@ -376,7 +390,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 available = agency_api.brands(group)
             except agency_api.AgencyError as exc:
                 self._json(502, {"error": str(exc)}); return
-            picked = store.load_selection(group)
+            picked = effective_selection(group, available)
             self._json(200, {
                 "brands": available,
                 # Never ticked before = start with everything on, which is what

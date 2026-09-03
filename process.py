@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """Process scraped data: filter to the report month, aggregate, top5, media metrics, download images."""
-import json, os, urllib.parse, urllib.request, ssl
+import glob, io, json, os, ssl, urllib.parse, urllib.request
+from PIL import Image
 
 import brandset
 import month_util
@@ -17,21 +18,44 @@ PAGES = [b["key"] for b in BRANDS]
 DOW_TH = ["จันทร์", "อังคาร", "พุธ", "พฤหัส", "ศุกร์", "เสาร์", "อาทิตย์"]
 
 
-def _slug(url):
-    """The vanity part of a page URL: .../PaoSociety/ -> paosociety."""
+# A page URL is not always /<name>: Facebook also serves /p/<name>-<id>,
+# /people/<name>/<id> and /profile.php?id=<id>.
+WRAPPERS = {'p', 'people', 'pages', 'pg', 'profile.php'}
+
+# Anything this short says nothing about which page a post came from. "p" as an
+# alias matches every https:// URL there is, which quietly hands one brand every
+# post the others failed to claim.
+MIN_ALIAS = 4
+
+
+def _aliases(url):
+    """Distinctive strings from a page URL that identify it inside another URL."""
+    out = set()
     try:
-        path = urllib.parse.urlparse(url).path.strip('/')
-        return (path.split('/')[0] or '').lower()
+        u = urllib.parse.urlparse(url)
+        parts = [urllib.parse.unquote(s) for s in u.path.strip('/').split('/') if s]
     except Exception:
-        return ''
+        return out
+    if parts and parts[0].lower() not in WRAPPERS:
+        out.add(parts[0].lower())
+    elif len(parts) > 1:
+        # the numeric id is the surest match; the name is the readable one
+        out.add(parts[1].lower())
+        tail = parts[1].rsplit('-', 1)[-1]
+        if tail.isdigit() and len(tail) >= 6:
+            out.add(tail)
+    for pair in (u.query or '').split('&'):
+        if pair.startswith('id=') and pair[3:].isdigit():
+            out.add(pair[3:])
+    return {a for a in out if len(a) >= MIN_ALIAS}
 
 
 # Longest alias first so a page whose slug contains another's (say "omo" inside
 # "omothailand") cannot be claimed by the shorter one.
-ALIASES = sorted(
-    ((b["key"], {a for a in (b["key"].lower(), _slug(b["url"])) if a}) for b in BRANDS),
-    key=lambda kv: -max(len(a) for a in kv[1]),
-)
+ALIASES = [(k, al) for k, al in
+           ((b["key"], _aliases(b["url"]) | ({b["key"].lower()} if len(b["key"]) >= MIN_ALIAS else set()))
+            for b in BRANDS) if al]
+ALIASES.sort(key=lambda kv: -max(len(a) for a in kv[1]))
 
 
 def fname(key):
@@ -97,6 +121,10 @@ for it in RAW:
     buckets[k].append(it)
 
 print("skipped(no page match):", skipped)
+blind = [b["key"] for b in BRANDS if b["key"] not in dict(ALIASES)]
+if blind:
+    # Better to say so than to let the page sit at zero and look like a quiet month.
+    print("WARNING: ไม่มีคำระบุเพจที่ใช้จับคู่ได้ —", ", ".join(blind))
 for k in PAGES:
     print(f"  {k}: {len(buckets.get(k, []))} posts in {M['iso']}")
 
@@ -159,7 +187,6 @@ for k in PAGES:
 
 # Clear last run's images first. Files are named by page + rank, so a leftover
 # file would otherwise be picked up by a post that has no image of its own.
-import glob, shutil
 for d in ('post_images', 'post_images_cropped', 'post_images_all'):
     n = 0
     for f in glob.glob(os.path.join(d, '*.jpg')):
@@ -173,6 +200,43 @@ ctx = ssl.create_default_context()
 ctx.check_hostname = False
 ctx.verify_mode = ssl.CERT_NONE
 UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"
+
+# Page avatars. Every scraped post carries the page's profile picture in
+# user.profilePic, so the real logo costs nothing extra — the alternative was a
+# coloured circle with an initial in it, which tells the reader nothing.
+os.makedirs('page_avatars', exist_ok=True)
+for f in glob.glob(os.path.join('page_avatars', '*.jpg')):
+    os.remove(f)
+
+def avatar_url(posts):
+    for p in posts:
+        pic = ((p.get('user') or {}) if isinstance(p.get('user'), dict) else {}).get('profilePic')
+        if pic:
+            return pic
+    return None
+
+avatars = {}
+for k in PAGES:
+    url = avatar_url(buckets.get(k, []))
+    if not url:
+        continue
+    path = f"page_avatars/{fname(k)}.jpg"
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": UA})
+        with urllib.request.urlopen(req, timeout=30, context=ctx) as r:
+            data = r.read()
+        # Square it once here so the page can just draw it in a round frame.
+        im = Image.open(io.BytesIO(data)).convert('RGB')
+        w, h = im.size
+        side = min(w, h)
+        im = im.crop(((w - side) // 2, (h - side) // 2,
+                      (w - side) // 2 + side, (h - side) // 2 + side))
+        im.resize((160, 160), Image.LANCZOS).save(path, quality=88)
+        avatars[k] = os.path.abspath(path)
+        print("avatar", path)
+    except Exception as e:
+        print("FAIL avatar", k, str(e)[:80])
+
 for k in PAGES:
     for i, p in enumerate(top5[k], 1):
         url = p.get('image_url')
@@ -194,8 +258,6 @@ for k in PAGES:
 # download small thumbnails for ALL posts (contact-sheet overview).
 # Keep the ORIGINAL aspect ratio (no square crop) — just scale down to a bounded
 # size so non-square images display in their true shape.
-import io
-from PIL import Image
 os.makedirs('post_images_all', exist_ok=True)
 
 def save_thumb(data, path, target_h=200, max_w=520):
@@ -234,6 +296,7 @@ for k in PAGES:
 # Stamp the month and the brand set so a later step cannot build a deck from
 # another month's data, or label one group's numbers with another group's name.
 json.dump({'month': M['iso'], 'group_id': brandset.group_id(), 'brands': BRANDS,
+           'avatars': avatars,
            'agg': agg, 'metrics': metrics, 'top5': top5, 'all': allposts,
            'daily': {k: dict(daily[k]) for k in PAGES}},
           open('/tmp/processed_8.json', 'w'), ensure_ascii=False, indent=1)

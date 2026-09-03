@@ -120,14 +120,21 @@ def build():
             'w': p.get('thumb_w'), 'h': p.get('thumb_h'),
         } for p in lst]
 
+    AVATARS = P.get('avatars') or {}
+
     def logo_b64(key):
-        # Logo files are checked in per page key; a brand without one falls back to
-        # the coloured initial the page already draws when this returns "".
-        p = os.path.join(ROOT, 'logos', '%s.jpg' % ''.join(
-            c if (c.isalnum() or c in '-_') else '_' for c in key))
-        if os.path.exists(p):
-            with open(p, 'rb') as f:
-                return "data:image/jpeg;base64," + base64.b64encode(f.read()).decode()
+        # The page's own profile picture, scraped with the posts, is the real
+        # logo and covers every brand. logos/ holds hand-placed files for the
+        # original eight pages and still wins nothing — it is only the fallback
+        # for a page whose avatar could not be fetched. Neither: "" and the page
+        # draws its coloured initial instead.
+        safe = ''.join(c if (c.isalnum() or c in '-_') else '_' for c in key)
+        for p in (AVATARS.get(key),
+                  os.path.join(ROOT, 'page_avatars', '%s.jpg' % safe),
+                  os.path.join(ROOT, 'logos', '%s.jpg' % safe)):
+            if p and os.path.exists(p):
+                with open(p, 'rb') as f:
+                    return "data:image/jpeg;base64," + base64.b64encode(f.read()).decode()
         return ""
 
     # metrics overview rows derived from the scrape (posts/likes/comments/shares/total/avg

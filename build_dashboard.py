@@ -152,6 +152,7 @@ HTML = r'''<!DOCTYPE html>
   .sum-card{background:#FBFCFE;border:1px solid var(--line);border-left:4px solid var(--accent);border-radius:14px;padding:16px 18px}
   .sum-head{display:flex;align-items:center;gap:10px;font-family:var(--head);font-weight:700;font-size:15.5px;margin-bottom:13px;color:var(--txt)}
   .sum-dot{width:27px;height:27px;border-radius:50%;display:grid;place-items:center;color:#fff;font-weight:800;font-size:13px;font-family:var(--head);flex:none}
+  .sum-av{width:27px;height:27px;border-radius:50%;object-fit:cover;flex:none;background:#fff;border:1px solid var(--line)}
   .sum-label{font-family:var(--head);font-size:11px;font-weight:700;letter-spacing:.6px;color:var(--muted);margin:2px 0 9px}
   .sum-top{list-style:none;display:flex;flex-direction:column;gap:9px;margin-bottom:15px}
   .sum-top li{display:flex;gap:9px;font-size:12.5px;line-height:1.55;color:#3A4658}
@@ -460,6 +461,9 @@ const thaiMonth = iso => { const p = String(iso||'').split('-');
   return p.length === 2 ? THM[+p[1]-1] + ' ' + (+p[0] + 543) : (iso || ''); };
 const short = k => DATA.brands.find(b=>b.key===k).name.replace(' Thailand','');
 const order = [...DATA.brands].sort((a,b)=>DATA.agg[b.key].total-DATA.agg[a.key].total);
+/* Avatars ride along on the overview rows; read them from there rather than
+   carrying a second copy of every image in the payload. */
+const LOGO = Object.fromEntries((DATA.mo||[]).map(r=>[r.key, r.logo||'']));
 const maxTotal = Math.max(...DATA.brands.map(b=>DATA.agg[b.key].total));
 /* With no group picked there are no brands at all, so keep a stand-in rather
    than letting every tile that reads a colour off it throw. */
@@ -626,7 +630,9 @@ document.getElementById('allGrid').innerHTML = order.map(b=>{
 document.getElementById('sumGrid').innerHTML = order.map(b=>{
   const s = DATA.summary[b.key]; if(!s) return '';
   return `<div class="sum-card" style="border-left-color:${b.color}">
-    <div class="sum-head"><span class="sum-dot" style="background:${b.color}">${b.letter}</span>${b.name}</div>
+    <div class="sum-head">${LOGO[b.key]
+      ? `<img class="sum-av" src="${LOGO[b.key]}" alt="">`
+      : `<span class="sum-dot" style="background:${b.color}">${b.letter}</span>`}${b.name}</div>
     <div class="sum-label">🏆 TOP 3 คอนเทนต์เด่น</div>
     <ul class="sum-top">${s.top3.map((t,i)=>`<li><span class="rk" style="background:${b.color}">${i+1}</span><span>${t}</span></li>`).join('')}</ul>
     <div class="sum-label">📅 ภาพรวมคอนเทนต์ทั้งเดือน</div>

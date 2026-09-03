@@ -12,3 +12,7 @@ __pycache__/
 # Scratch / intermediate scrape output
 raw_agencies_chrome.json
 slides_output/
+
+# Page profile pictures, downloaded fresh with every scrape and inlined into
+# the payload — nothing reads them off disk after the run that made them
+page_avatars/
