@@ -31,10 +31,28 @@ python3 build_slides.py
 python3 build_dashboard.py
 ```
 
-## ปุ่มโหลดข้อมูลใหม่
+## เลือกเดือนและโหลดข้อมูลใหม่
 
-Dashboard มีปุ่ม **โหลดข้อมูลใหม่** ที่มุมขวาบน ซึ่งสั่งให้ `server.py` รัน pipeline
-ทั้งสามขั้น (scrape → process → build) แล้วรีเฟรชหน้าเมื่อเสร็จ
+มุมขวาบนของ dashboard มีปฏิทินเลือกเดือน (📅) และปุ่ม **โหลดข้อมูลใหม่**
+เลือกเดือนแล้วกดปุ่ม `server.py` จะรัน pipeline ทั้งสามขั้น
+(scrape → process → build) สำหรับเดือนนั้น แล้วรีเฟรชหน้าเมื่อเสร็จ
+
+ปฏิทินเขียนขึ้นเองไม่ได้ใช้ `<input type="month">` เพราะ Safari บน macOS
+ไม่มี native month picker เดือนที่ยังไม่มาถึงจะกดไม่ได้
+
+เดือนที่ใช้มาจาก `$REPORT_MONTH` (รูปแบบ `YYYY-MM`) ซึ่ง `month_util.py`
+เป็นตัวกลางแปลงเป็นช่วงวันที่ scrape, ตัวกรองโพสต์ และป้ายชื่อเดือนบนหน้าเว็บ
+ทั้งหมด — รันจาก command line ก็ได้:
+
+```bash
+REPORT_MONTH=2026-06 APIFY_TOKEN=apify_api_xxx python3 scrape_apify.py
+REPORT_MONTH=2026-06 python3 process.py
+REPORT_MONTH=2026-06 python3 build_dashboard.py
+```
+
+> **ข้อจำกัด:** ตัวเลข กราฟ รูป และป้ายเดือนเปลี่ยนตามเดือนที่เลือกอัตโนมัติ
+> แต่ข้อความวิเคราะห์ในกล่อง (`report_config.py`) เป็นงานเขียนมือของเดือน
+> พฤษภาคม 2569 จึงต้องเขียนใหม่เองทุกครั้งที่เปลี่ยนเดือน
 
 ปุ่มทำงานได้เฉพาะเมื่อเปิดจากเว็บที่รัน `server.py` (เช่น Railway) — บน GitHub Pages
 เป็นไฟล์นิ่งจึงไม่มี backend ปุ่มจะถูกปิดพร้อมข้อความอธิบาย

@@ -29,6 +29,8 @@ import sys
 import threading
 import time
 
+import month_util
+
 ROOT = os.path.dirname(os.path.abspath(__file__))
 PORT = int(os.environ.get("PORT", "8000"))
 APIFY_TOKEN = os.environ.get("APIFY_TOKEN", "").strip()
@@ -46,6 +48,7 @@ JOB = {
     "running": False,
     "step": "",
     "error": "",
+    "month": month_util.info()["iso"],
     "started": None,
     "last_finished": None,
     "log": [],
@@ -81,9 +84,11 @@ def explain(stderr):
     return lines[-1][:200] if lines else "ไม่มีรายละเอียดข้อผิดพลาด"
 
 
-def run_pipeline():
-    """Execute the pipeline steps in order, recording progress in JOB."""
-    env = dict(os.environ, APIFY_TOKEN=APIFY_TOKEN, PYTHONUNBUFFERED="1")
+def run_pipeline(month):
+    """Execute the pipeline steps in order for `month`, recording progress."""
+    env = dict(os.environ, APIFY_TOKEN=APIFY_TOKEN, REPORT_MONTH=month,
+               PYTHONUNBUFFERED="1")
+    _log("=== รายงานเดือน %s ===" % month)
     try:
         for label, script in STEPS:
             with JOB_LOCK:
@@ -130,9 +135,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     "running": JOB["running"],
                     "step": JOB["step"],
                     "error": JOB["error"],
+                    "month": JOB["month"],
                     "started": JOB["started"],
                     "last_finished": JOB["last_finished"],
                     "configured": bool(APIFY_TOKEN),
+                    "current_month": month_util.info()["iso"],
                     "log": JOB["log"][-20:],
                 })
             return
@@ -151,14 +158,30 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if self.headers.get("X-Refresh-Key", "") != REFRESH_KEY:
             self._json(401, {"error": "refresh key ไม่ถูกต้อง"})
             return
+        month = month_util.info()["iso"]
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+            if length > 0:
+                asked = json.loads(self.rfile.read(length) or b"{}").get("month")
+                if asked:
+                    month_util.parse(asked)          # raises on a bad month
+                    month = asked
+        except ValueError as exc:
+            self._json(400, {"error": str(exc)})
+            return
+        except Exception:
+            self._json(400, {"error": "อ่านคำขอไม่สำเร็จ"})
+            return
+
         with JOB_LOCK:
             if JOB["running"]:
-                self._json(409, {"error": "กำลังทำงานอยู่แล้ว", "step": JOB["step"]})
+                self._json(409, {"error": "กำลังทำงานอยู่แล้ว", "step": JOB["step"],
+                                 "month": JOB["month"]})
                 return
-            JOB.update(running=True, step="กำลังเริ่ม", error="", log=[],
+            JOB.update(running=True, step="กำลังเริ่ม", error="", log=[], month=month,
                        started=time.strftime("%Y-%m-%d %H:%M"))
-        threading.Thread(target=run_pipeline, daemon=True).start()
-        self._json(202, {"started": True})
+        threading.Thread(target=run_pipeline, args=(month,), daemon=True).start()
+        self._json(202, {"started": True, "month": month})
 
     def end_headers(self):
         # The dashboard is regenerated in place, so never serve it from cache.

@@ -1,9 +1,13 @@
 # -*- coding: utf-8 -*-
 """Process scraped data: filter May 2026, aggregate, top5, media metrics, download images."""
 import json, os, urllib.request, ssl
+
+import month_util
 from collections import defaultdict, Counter
 
 RAW = json.load(open('/tmp/fb_raw_8.json'))
+M = month_util.info()
+print("MONTH", M["iso"], M["en_label"], flush=True)
 
 # canonical page keys we care about (in requested order)
 PAGES = ["FinelineThailand", "HygieneThailand", "DownyThailand", "PaoSociety",
@@ -65,7 +69,7 @@ def best_image_url(item):
 # filter May 2026
 def in_may(item):
     t = (item.get('time') or '')[:10]
-    return t.startswith('2026-05')
+    return t.startswith(M['iso'])
 
 buckets = defaultdict(list)
 skipped = 0

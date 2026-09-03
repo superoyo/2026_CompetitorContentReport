@@ -1,6 +1,11 @@
 # -*- coding: utf-8 -*-
-"""Scrape June 2026 posts for 8 FB pages via Apify facebook-posts-scraper."""
+"""Scrape one month of posts for 8 FB pages via Apify facebook-posts-scraper.
+
+The month comes from $REPORT_MONTH (YYYY-MM); see month_util.py.
+"""
 import json, os, sys, time, urllib.request, urllib.error
+
+import month_util
 
 # Token is supplied per run via the environment — never hardcoded/committed.
 #   APIFY_TOKEN=apify_api_xxx python3 scrape_apify.py
@@ -20,11 +25,14 @@ PAGES = [
     "https://www.facebook.com/ATTACKFamily/",
 ]
 
+M = month_util.info()
+print("MONTH", M["iso"], M["en_label"], "window", M["scrape_from"], "->", M["scrape_to"], flush=True)
+
 payload = {
     "startUrls": [{"url": u} for u in PAGES],
     "resultsLimit": 60,
-    "onlyPostsNewerThan": "2026-05-28",
-    "onlyPostsOlderThan": "2026-07-03",
+    "onlyPostsNewerThan": M["scrape_from"],
+    "onlyPostsOlderThan": M["scrape_to"],
 }
 
 def api(method, url, data=None):

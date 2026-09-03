@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 import json, base64, os
 
+import month_util
+
 ROOT = os.path.dirname(os.path.abspath(__file__))
 from report_config import BRANDS, ANALYSIS, PAGE_URL, CONTENT_SUMMARY, KEY_LEARNING
 
@@ -10,7 +12,8 @@ AGG = P['agg']; MET = P['metrics']; TOP5 = P['top5']; DAILY = P['daily']; ALL = 
 NAME = {b[0]: b[1] for b in BRANDS}
 
 # daily series across May
-all_days = [f"2026-05-{d:02d}" for d in range(1, 32)]
+M = month_util.info()
+all_days = [f"{M['iso']}-{d:02d}" for d in range(1, M['days'] + 1)]
 daily_series = {k: [DAILY.get(k, {}).get(day, 0) for day in all_days] for k in AGG}
 
 def img_b64(path):
@@ -95,7 +98,7 @@ HTML = r'''<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Facebook Engagement Dashboard — พฤษภาคม 2569</title>
+<title>Facebook Engagement Dashboard — __M_TH__ __M_BE__</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@400;500;600;700;800&family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -250,6 +253,7 @@ HTML = r'''<!DOCTYPE html>
   @media(max-width:1100px){.kpis{grid-template-columns:repeat(2,1fr)}.grid{grid-template-columns:1fr}.posts{grid-template-columns:repeat(2,1fr)}}
   .head-right{display:flex;align-items:center;gap:12px;flex-wrap:wrap;justify-content:flex-end}
   .rf-wrap{display:flex;flex-direction:column;align-items:flex-end;gap:5px}
+  .rf-row{display:flex;align-items:center;gap:9px}
   .rf-btn{font-family:var(--head);font-size:13px;font-weight:700;color:#fff;background:#1877F2;border:none;
     padding:10px 18px;border-radius:999px;cursor:pointer;display:flex;align-items:center;gap:8px;
     box-shadow:var(--shadow);transition:.15s;white-space:nowrap}
@@ -259,21 +263,64 @@ HTML = r'''<!DOCTYPE html>
     border-radius:50%;animation:rfspin .7s linear infinite;display:none;flex:none}
   .rf-btn.busy .rf-sp{display:block}
   @keyframes rfspin{to{transform:rotate(360deg)}}
-  .rf-msg{font-size:11.5px;color:#7A8694;font-family:var(--head);max-width:280px;text-align:right;line-height:1.45}
+  .rf-msg{font-size:11.5px;color:#7A8694;font-family:var(--head);max-width:330px;text-align:right;line-height:1.45}
+  /* month picker */
+  .mp-wrap{position:relative}
+  .mp-btn{font-family:var(--head);font-size:13px;font-weight:700;color:#3B4654;background:var(--panel);
+    border:1px solid var(--line);padding:9px 14px;border-radius:999px;cursor:pointer;display:flex;
+    align-items:center;gap:7px;box-shadow:var(--shadow);white-space:nowrap;transition:.15s}
+  .mp-btn:hover{border-color:#1877F2;color:#1877F2}
+  .mp-btn .mp-cal{font-size:14px;line-height:1}
+  .mp-pop{position:absolute;top:calc(100% + 8px);right:0;z-index:60;background:var(--panel);
+    border:1px solid var(--line);border-radius:14px;box-shadow:0 14px 36px rgba(16,24,40,.18);
+    padding:14px;width:254px;display:none;text-align:left}
+  .mp-pop.open{display:block}
+  .mp-yr{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+  .mp-yr b{font-family:var(--head);font-size:13.5px;font-weight:800;color:#1B2430}
+  .mp-nav{width:27px;height:27px;border-radius:8px;border:1px solid var(--line);background:var(--panel2);
+    cursor:pointer;color:#5A6675;font-size:14px;line-height:1;display:grid;place-items:center;padding:0}
+  .mp-nav:hover:not(:disabled){border-color:#1877F2;color:#1877F2}
+  .mp-nav:disabled{opacity:.32;cursor:not-allowed}
+  .mp-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+  .mp-m{font-family:var(--head);font-size:12.5px;font-weight:700;padding:9px 0;border-radius:9px;
+    border:1px solid transparent;background:var(--panel2);color:#3B4654;cursor:pointer;transition:.12s}
+  .mp-m:hover:not(:disabled){background:#E7F0FE;color:#1877F2}
+  .mp-m.sel{background:#1877F2;color:#fff}
+  .mp-m:disabled{opacity:.3;cursor:not-allowed}
+  .mp-note{font-size:10.5px;color:#7A8694;font-family:var(--head);margin-top:11px;line-height:1.45}
+  @media(max-width:640px){.head-right{justify-content:flex-start}.rf-msg{text-align:left;max-width:100%}
+    .mp-pop{right:auto;left:0}}
 </style>
 </head>
 <body>
   <div class="head">
     <div>
       <h1>Facebook Engagement Dashboard</h1>
-      <div class="sub">สรุปยอด Engagement 8 เพจ — ประจำเดือนพฤษภาคม 2569 (May 2026)</div>
+      <div class="sub">สรุปยอด Engagement 8 เพจ — ประจำเดือน__M_TH__ __M_BE__ (__M_EN__)</div>
     </div>
     <div class="head-right">
-      <div class="badge">1–31 พ.ค. 2569</div>
+      <div class="badge">1–__M_DAYS__ __M_ABBR__ __M_BE__</div>
       <div class="rf-wrap">
-        <button id="refreshBtn" class="rf-btn" type="button">
-          <span class="rf-sp"></span><span class="rf-lbl">โหลดข้อมูลใหม่</span>
-        </button>
+        <div class="rf-row">
+          <div class="mp-wrap">
+            <button id="mpBtn" class="mp-btn" type="button" data-month="__M_ISO__"
+                    aria-haspopup="dialog" aria-expanded="false">
+              <span class="mp-cal">📅</span><span id="mpLbl">—</span>
+            </button>
+            <div class="mp-pop" id="mpPop" role="dialog" aria-label="เลือกเดือนที่ต้องการโหลด">
+              <div class="mp-yr">
+                <button class="mp-nav" id="mpPrev" type="button" aria-label="ปีก่อนหน้า">&lsaquo;</button>
+                <b id="mpYr">—</b>
+                <button class="mp-nav" id="mpNext" type="button" aria-label="ปีถัดไป">&rsaquo;</button>
+              </div>
+              <div class="mp-grid" id="mpGrid"></div>
+              <div class="mp-note">เลือกเดือน แล้วกดปุ่มโหลดข้อมูลใหม่ · เดือนที่ยังไม่มาถึงจะกดไม่ได้</div>
+            </div>
+          </div>
+          <button id="refreshBtn" class="rf-btn" type="button">
+            <span class="rf-sp"></span><span class="rf-lbl">โหลดข้อมูลใหม่</span>
+          </button>
+        </div>
         <div class="rf-msg" id="rfMsg"></div>
       </div>
     </div>
@@ -298,13 +345,13 @@ HTML = r'''<!DOCTYPE html>
 
   <div class="card" style="margin-bottom:24px">
     <h2>แนวโน้ม Engagement รายวัน</h2>
-    <div class="hint">ยอด Engagement รวมของโพสต์แต่ละวัน ตลอดเดือนพฤษภาคม</div>
+    <div class="hint">ยอด Engagement รวมของโพสต์แต่ละวัน ตลอดเดือน__M_TH__</div>
     <div class="chart-wrap" style="height:300px"><canvas id="lineChart"></canvas></div>
   </div>
 
   <div class="card allbox">
-    <h2>ภาพรวมคอนเทนต์ทั้งหมด — พฤษภาคม 2569</h2>
-    <div class="hint">ทุกโพสต์ของทั้ง 8 เพจในเดือน พ.ค. รวมในกรอบเดียว · แสดงภาพตามสัดส่วนจริงของแต่ละคอนเทนต์ (แนวตั้ง/แนวนอน/จัตุรัส) · เรียงตาม Engagement มาก→น้อยในแต่ละเพจ · มุมล่างขวาคือวันที่โพสต์ · คลิกที่ภาพเพื่อเปิดโพสต์จริง</div>
+    <h2>ภาพรวมคอนเทนต์ทั้งหมด — __M_TH__ __M_BE__</h2>
+    <div class="hint">ทุกโพสต์ของทั้ง 8 เพจในเดือน __M_ABBR__ รวมในกรอบเดียว · แสดงภาพตามสัดส่วนจริงของแต่ละคอนเทนต์ (แนวตั้ง/แนวนอน/จัตุรัส) · เรียงตาม Engagement มาก→น้อยในแต่ละเพจ · มุมล่างขวาคือวันที่โพสต์ · คลิกที่ภาพเพื่อเปิดโพสต์จริง</div>
     <div id="allGrid"></div>
   </div>
 
@@ -316,7 +363,7 @@ HTML = r'''<!DOCTYPE html>
 
   <div class="card sum-box">
     <h2>สรุปวิเคราะห์คอนเทนต์ — Top 3 &amp; ภาพรวมทั้งเดือนของแต่ละเพจ</h2>
-    <div class="hint">Top 3 คอนเทนต์เด่นของแต่ละเพจว่าเกี่ยวกับอะไรและสื่อสารอะไร พร้อมภาพรวมความเคลื่อนไหวและความหลากหลายของคอนเทนต์ตลอดเดือนพฤษภาคม (มองเชิงเนื้อหา ไม่อิงตัวเลข Engagement)</div>
+    <div class="hint">Top 3 คอนเทนต์เด่นของแต่ละเพจว่าเกี่ยวกับอะไรและสื่อสารอะไร พร้อมภาพรวมความเคลื่อนไหวและความหลากหลายของคอนเทนต์ตลอดเดือน__M_TH__ (มองเชิงเนื้อหา ไม่อิงตัวเลข Engagement)</div>
     <div class="sum-grid" id="sumGrid"></div>
   </div>
 
@@ -325,7 +372,7 @@ HTML = r'''<!DOCTYPE html>
   <div class="foot-note">
     <b>หมายเหตุ:</b> ข้อมูลดึงจากโพสต์สาธารณะบนเพจ Facebook ผ่านเครื่องมือสแครปข้อมูล (Apify) ไม่ใช่ตัวเลขจาก Facebook Page Insights โดยตรง &middot;
     Engagement = Likes/Reactions + Comments + Shares ไม่รวม Reach / Impressions / Click &middot;
-    ช่วงข้อมูล 1–31 พฤษภาคม 2569 &middot; จำนวนโพสต์ต่อเพจต่างกันตามความถี่โพสต์จริง (เพจที่มีโพสต์น้อย ตัวเลขจึงสะท้อนช่วงตัวอย่างจำกัด)
+    ช่วงข้อมูล 1–__M_DAYS__ __M_TH__ __M_BE__ &middot; จำนวนโพสต์ต่อเพจต่างกันตามความถี่โพสต์จริง (เพจที่มีโพสต์น้อย ตัวเลขจึงสะท้อนช่วงตัวอย่างจำกัด)
   </div>
 
 <script>
@@ -341,7 +388,7 @@ const mo = DATA.mo, mmax = DATA.mo_max;
 const moCell = (v,disp,col)=>`<td class="num ${v===mmax[col]?'hi':''}">${disp}</td>`;
 document.getElementById('moCard').innerHTML = `
   <h2>Metrics Overview</h2>
-  <div class="hint">ภาพรวมทุกเพจจากโพสต์จริงในเดือนพฤษภาคม — จำนวนโพสต์, Reactions, Comments, Shares, Engagement รวม/เฉลี่ย และฟอร์แมตที่เวิร์กที่สุด (ตัวหนา = สูงสุดในคอลัมน์)</div>
+  <div class="hint">ภาพรวมทุกเพจจากโพสต์จริงในเดือน__M_TH__ — จำนวนโพสต์, Reactions, Comments, Shares, Engagement รวม/เฉลี่ย และฟอร์แมตที่เวิร์กที่สุด (ตัวหนา = สูงสุดในคอลัมน์)</div>
   <div class="mo-scroll"><table class="mo">
     <thead><tr>
       <th class="l">Name</th><th>โพสต์</th><th>Reactions<br>(ไลก์)</th><th>Comments</th>
@@ -366,7 +413,7 @@ document.getElementById('moCard').innerHTML = `
 const kpis = [
   {label:'Engagement รวมทั้งหมด', val:fmt(DATA.grand_total), foot:DATA.total_posts+' โพสต์จาก 8 เพจ'},
   {label:'เพจ Engagement สูงสุด', val:topBrand.name.replace(' Thailand',''), foot:fmt(DATA.agg[topBrand.key].total)+' engagement'},
-  {label:'โพสต์ทั้งหมด', val:fmt(DATA.total_posts), foot:'รวมทุกเพจในเดือน พ.ค.'},
+  {label:'โพสต์ทั้งหมด', val:fmt(DATA.total_posts), foot:'รวมทุกเพจในเดือน __M_ABBR__'},
   {label:'Engagement เฉลี่ย/โพสต์', val:fmt(Math.round(DATA.grand_total/DATA.total_posts)), foot:'ค่าเฉลี่ยรวมทุกเพจ'},
 ];
 document.getElementById('kpis').innerHTML = kpis.map((k,i)=>`
@@ -410,7 +457,7 @@ new Chart(document.getElementById('lineChart'),{
       borderWidth:2,tension:.35,pointRadius:0,pointHoverRadius:5,fill:false}))},
   options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
     plugins:{legend:{labels:{color:'#4B5768',usePointStyle:true,pointStyle:'circle',padding:14,font:{size:12,family:'Sarabun'}}},
-      tooltip:{callbacks:{title:c=>'วันที่ '+c[0].label+' พ.ค.',label:c=>' '+c.dataset.label+': '+fmt(c.parsed.y)}}},
+      tooltip:{callbacks:{title:c=>'วันที่ '+c[0].label+' __M_ABBR__',label:c=>' '+c.dataset.label+': '+fmt(c.parsed.y)}}},
     scales:{x:{ticks:{color:'#7C8797',maxTicksLimit:15},grid:{display:false},title:{display:true,text:'วันที่',color:'#7C8797'}},
       y:{ticks:{color:'#7C8797',callback:v=>fmt(v)},grid:{color:'#EAEDF2'}}}}
 });
@@ -430,7 +477,7 @@ function renderAI(key){
     <div class="ai-head">
       <div class="ai-logo" style="background:linear-gradient(135deg,${b.color},#06B6D4)">✨</div>
       <div class="t">บทวิเคราะห์ &amp; ข้อเสนอแนะ — ${b.name}
-        <small>วิเคราะห์จากคอนเทนต์ทั้งหมด ${g.posts} โพสต์ในเดือนพฤษภาคม &middot; Engagement รวม ${fmt(g.total)} &middot; เฉลี่ย ${fmt(g.avg)}/โพสต์</small>
+        <small>วิเคราะห์จากคอนเทนต์ทั้งหมด ${g.posts} โพสต์ในเดือน__M_TH__ &middot; Engagement รวม ${fmt(g.total)} &middot; เฉลี่ย ${fmt(g.avg)}/โพสต์</small>
       </div>
     </div>
     <div class="ai-chips">${a.chips.map(c=>`<span class="ai-chip">${c}</span>`).join('')}</div>
@@ -537,17 +584,74 @@ tabsEl.addEventListener('click',e=>{
 });
 </script>
 <script>
-/* Refresh button: asks the server to re-run the Apify pipeline, then polls
-   /api/status until the run ends and reloads to show the new dashboard.
-   The Apify token lives only on the server; the page never sees it. */
+/* Month picker + refresh button.
+   The picker is hand-rolled because Safari on macOS has no native
+   <input type="month"> UI. Picking a month only changes what the next
+   refresh asks for; the server re-runs the Apify pipeline for that month
+   and rebuilds the page. The Apify token stays server-side. */
 (function(){
   var btn=document.getElementById('refreshBtn'), msg=document.getElementById('rfMsg');
   if(!btn) return;
+  var mpBtn=document.getElementById('mpBtn'), mpPop=document.getElementById('mpPop'),
+      mpGrid=document.getElementById('mpGrid'), mpYr=document.getElementById('mpYr'),
+      mpLbl=document.getElementById('mpLbl'), mpPrev=document.getElementById('mpPrev'),
+      mpNext=document.getElementById('mpNext');
   var SK='fbdash_refresh_key', timer=null;
+  var TH=['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
 
-  function label(t){btn.querySelector('.rf-lbl').textContent=t;}
-  function busy(on){btn.classList.toggle('busy',on);btn.disabled=on;}
+  /* ---------- month picker ---------- */
+  var now=new Date(), maxY=now.getFullYear(), maxM=now.getMonth()+1, minY=2024;
+  var start=(mpBtn.getAttribute('data-month')||'').split('-');
+  var sel={y:+start[0]||maxY, m:+start[1]||maxM}, viewY=sel.y;
+
+  function pad(n){return (n<10?'0':'')+n;}
+  function isoSel(){return sel.y+'-'+pad(sel.m);}
+  function drawLabel(){mpLbl.textContent=TH[sel.m-1]+' '+(sel.y+543);}
+
+  function drawGrid(){
+    mpYr.textContent=viewY+' / พ.ศ. '+(viewY+543);
+    mpPrev.disabled=viewY<=minY;
+    mpNext.disabled=viewY>=maxY;
+    mpGrid.innerHTML='';
+    for(var i=1;i<=12;i++){
+      var b=document.createElement('button');
+      b.type='button';
+      b.className='mp-m'+(viewY===sel.y&&i===sel.m?' sel':'');
+      b.textContent=TH[i-1];
+      b.setAttribute('data-m',String(i));
+      b.disabled=(viewY>maxY)||(viewY===maxY&&i>maxM);
+      mpGrid.appendChild(b);
+    }
+  }
+  function openPop(on){
+    mpPop.classList.toggle('open',on);
+    mpBtn.setAttribute('aria-expanded',on?'true':'false');
+    if(on){viewY=sel.y;drawGrid();}
+  }
+
+  mpBtn.addEventListener('click',function(e){e.stopPropagation();openPop(!mpPop.classList.contains('open'));});
+  mpPrev.addEventListener('click',function(){if(viewY>minY){viewY--;drawGrid();}});
+  mpNext.addEventListener('click',function(){if(viewY<maxY){viewY++;drawGrid();}});
+  mpGrid.addEventListener('click',function(e){
+    var t=e.target;
+    if(!t||t.className.indexOf('mp-m')<0||t.disabled) return;
+    sel={y:viewY,m:+t.getAttribute('data-m')};
+    drawLabel();drawGrid();openPop(false);
+    if(isoSel()!==(mpBtn.getAttribute('data-month')||''))
+      say('เลือก '+TH[sel.m-1]+' '+(sel.y+543)+' — กดโหลดข้อมูลใหม่เพื่อดึงเดือนนี้');
+    else say('');
+  });
+  document.addEventListener('click',function(e){
+    if(mpPop.classList.contains('open') && !mpPop.contains(e.target) && e.target!==mpBtn) openPop(false);
+  });
+  document.addEventListener('keydown',function(e){if(e.key==='Escape') openPop(false);});
+  drawLabel();drawGrid();
+
+  /* ---------- refresh ---------- */
+  function lbl(t){btn.querySelector('.rf-lbl').textContent=t;}
+  function busy(on){btn.classList.toggle('busy',on);btn.disabled=on;mpBtn.disabled=on;}
   function say(t){msg.textContent=t||'';}
+  function thai(iso){var p=(iso||'').split('-');return p.length===2?TH[+p[1]-1]+' '+(+p[0]+543):iso;}
 
   function status(){
     return fetch('api/status',{cache:'no-store'}).then(function(r){
@@ -557,31 +661,31 @@ tabsEl.addEventListener('click',e=>{
   }
 
   function track(){
-    label('กำลังโหลดข้อมูล…'); busy(true);
+    lbl('กำลังโหลดข้อมูล…'); busy(true);
     clearInterval(timer);
     timer=setInterval(function(){
       status().then(function(s){
-        if(s.step) say(s.step+' — อาจใช้เวลาหลายนาที');
+        if(s.step) say(s.step+' · เดือน '+thai(s.month)+' — อาจใช้เวลาหลายนาที');
         if(!s.running){
           clearInterval(timer);
-          if(s.error){busy(false);label('โหลดข้อมูลใหม่');say('ผิดพลาด: '+s.error);}
-          else{label('เสร็จแล้ว กำลังรีเฟรช…');say('');setTimeout(function(){location.reload();},800);}
+          if(s.error){busy(false);lbl('โหลดข้อมูลใหม่');say('ผิดพลาด: '+s.error);}
+          else{lbl('เสร็จแล้ว กำลังรีเฟรช…');say('');setTimeout(function(){location.reload();},800);}
         }
       })['catch'](function(){
-        clearInterval(timer);busy(false);label('โหลดข้อมูลใหม่');say('ขาดการเชื่อมต่อเซิร์ฟเวอร์');
+        clearInterval(timer);busy(false);lbl('โหลดข้อมูลใหม่');say('ขาดการเชื่อมต่อเซิร์ฟเวอร์');
       });
     },5000);
   }
 
-  /* Probe on load: a static host (GitHub Pages, or opening the file directly)
-     has no API, so the button is disabled with an explanation. */
+  /* A static host (GitHub Pages, or the file opened directly) has no API:
+     the picker still works for looking around, but refreshing is disabled. */
   status().then(function(s){
     if(s.running){track();return;}
     if(!s.configured){btn.disabled=true;say('เซิร์ฟเวอร์ยังไม่ได้ตั้งค่า APIFY_TOKEN');return;}
     if(s.last_finished) say('อัปเดตล่าสุด '+s.last_finished);
   })['catch'](function(){
     btn.disabled=true;
-    say('หน้านี้เป็นไฟล์นิ่ง — กดโหลดข้อมูลใหม่ได้บนเว็บที่รันบน Railway');
+    say('หน้านี้เป็นไฟล์นิ่ง — เลือกเดือนแล้วกดโหลดได้บนเว็บที่รันบน Railway');
   });
 
   btn.addEventListener('click',function(){
@@ -591,18 +695,22 @@ tabsEl.addEventListener('click',e=>{
       if(!k) return;
       sessionStorage.setItem(SK,k);
     }
-    label('กำลังเริ่ม…'); busy(true); say('');
-    fetch('api/refresh',{method:'POST',headers:{'X-Refresh-Key':k}}).then(function(r){
+    lbl('กำลังเริ่ม…'); busy(true); say('เดือน '+thai(isoSel()));
+    fetch('api/refresh',{
+      method:'POST',
+      headers:{'X-Refresh-Key':k,'Content-Type':'application/json'},
+      body:JSON.stringify({month:isoSel()})
+    }).then(function(r){
       if(r.status===409){track();return;}
-      if(r.status===401){sessionStorage.removeItem(SK);busy(false);label('โหลดข้อมูลใหม่');say('Refresh key ไม่ถูกต้อง ลองอีกครั้ง');return;}
+      if(r.status===401){sessionStorage.removeItem(SK);busy(false);lbl('โหลดข้อมูลใหม่');say('Refresh key ไม่ถูกต้อง ลองอีกครั้ง');return;}
       if(!r.ok){
         return r.json()['catch'](function(){return {};}).then(function(j){
-          busy(false);label('โหลดข้อมูลใหม่');say(j.error||('เริ่มงานไม่สำเร็จ ('+r.status+')'));
+          busy(false);lbl('โหลดข้อมูลใหม่');say(j.error||('เริ่มงานไม่สำเร็จ ('+r.status+')'));
         });
       }
       track();
     })['catch'](function(){
-      busy(false);label('โหลดข้อมูลใหม่');say('เชื่อมต่อเซิร์ฟเวอร์ไม่ได้');
+      busy(false);lbl('โหลดข้อมูลใหม่');say('เชื่อมต่อเซิร์ฟเวอร์ไม่ได้');
     });
   });
 })();
@@ -611,6 +719,10 @@ tabsEl.addEventListener('click',e=>{
 </html>'''
 
 html = HTML.replace('__DATA__', data_json)
+for token, value in (('__M_TH__', M['th_full']), ('__M_ABBR__', M['th_abbr']),
+                     ('__M_BE__', str(M['be_year'])), ('__M_EN__', M['en_label']),
+                     ('__M_DAYS__', str(M['days'])), ('__M_ISO__', M['iso'])):
+    html = html.replace(token, value)
 # index.html is the site homepage served by GitHub / Railway
 out = os.path.join(ROOT, "index.html")
 with open(out, 'w', encoding='utf-8') as f:
