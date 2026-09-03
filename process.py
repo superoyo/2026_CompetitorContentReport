@@ -217,7 +217,9 @@ for k in PAGES:
             print("FAIL thumb", path, str(e)[:60])
     print(f"thumbs {k}: {ok}/{len(allposts[k])}")
 
-json.dump({'agg': agg, 'metrics': metrics, 'top5': top5, 'all': allposts,
+# Stamp the month so a later step cannot build a deck from another month's data.
+json.dump({'month': M['iso'],
+           'agg': agg, 'metrics': metrics, 'top5': top5, 'all': allposts,
            'daily': {k: dict(daily[k]) for k in PAGES}},
           open('/tmp/processed_8.json', 'w'), ensure_ascii=False, indent=1)
 print("\nSAVED /tmp/processed_8.json")

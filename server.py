@@ -28,6 +28,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.parse
 
 import month_util
 
@@ -64,6 +65,45 @@ def _log(line):
         JOB["log"].append(line)
         del JOB["log"][:-200]
     print(line, flush=True)
+
+
+PPTX_MIME = ("application/vnd.openxmlformats-officedocument"
+             ".presentationml.presentation")
+PROCESSED = os.environ.get("PROCESSED_JSON", "/tmp/processed_8.json")
+
+
+def deck_name(info):
+    return "%s_%d_Engagement_Top5.pptx" % (info["en_full"], info["year"])
+
+
+def build_deck(month):
+    """Regenerate the deck for `month` from data already on disk.
+
+    Costs nothing: it re-renders the processed JSON and never calls Apify.
+    Returns the file path, or raises RuntimeError explaining what is missing.
+    """
+    info = month_util.info(month)
+    path = os.path.join(ROOT, deck_name(info))
+    if os.path.exists(path):
+        return path
+    if not os.path.exists(PROCESSED):
+        raise RuntimeError("ยังไม่มีข้อมูลที่ประมวลผลไว้บนเซิร์ฟเวอร์ "
+                           "— ต้องกดโหลดข้อมูลใหม่ก่อนหนึ่งครั้ง")
+    try:
+        have = json.load(open(PROCESSED)).get("month")
+    except Exception:
+        have = None
+    if have and have != info["iso"]:
+        raise RuntimeError("ข้อมูลบนเซิร์ฟเวอร์เป็นของเดือน %s ไม่ใช่ %s "
+                           "— เลือกเดือนแล้วกดโหลดข้อมูลใหม่ก่อน" % (have, info["iso"]))
+    proc = subprocess.run(
+        [sys.executable, "build_slides.py"],
+        cwd=ROOT, env=dict(os.environ, REPORT_MONTH=info["iso"], PYTHONUNBUFFERED="1"),
+        capture_output=True, text=True, timeout=600,
+    )
+    if proc.returncode != 0 or not os.path.exists(path):
+        raise RuntimeError("สร้างสไลด์ไม่สำเร็จ — %s" % explain(proc.stderr))
+    return path
 
 
 def explain(stderr):
@@ -130,7 +170,31 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _send_deck(self, month):
+        try:
+            path = build_deck(month)
+        except ValueError as exc:
+            self._json(400, {"error": str(exc)}); return
+        except Exception as exc:
+            self._json(409, {"error": str(exc)}); return
+        with open(path, "rb") as f:
+            body = f.read()
+        self.send_response(200)
+        self.send_header("Content-Type", PPTX_MIME)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Content-Disposition",
+                         'attachment; filename="%s"' % os.path.basename(path))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_GET(self):
+        route = self.path.split("?", 1)[0].rstrip("/")
+        if route.endswith("/api/pptx"):
+            qs = urllib.parse.urlparse(self.path).query
+            asked = urllib.parse.parse_qs(qs).get("month", [None])[0]
+            self._send_deck(asked)
+            return
         if self.path.rstrip("/").endswith("/api/status"):
             with JOB_LOCK:
                 self._json(200, {
@@ -142,6 +206,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     "last_finished": JOB["last_finished"],
                     "configured": bool(APIFY_TOKEN),
                     "current_month": month_util.info()["iso"],
+                    "has_processed": os.path.exists(PROCESSED),
                     "log": JOB["log"][-20:],
                 })
             return

@@ -782,20 +782,67 @@ tabsEl.addEventListener('click',e=>{
 
   /* ---------- PPTX download ---------- */
   (function(){
-    var a=document.getElementById('pptBtn'); if(!a) return;
+    var a=document.getElementById('pptBtn'), lbl=document.getElementById('pptLbl');
+    if(!a) return;
     var href=a.getAttribute('href')||'';
-    /* Probe so a missing deck shows as unavailable instead of a 404 page. */
+    var mp=document.getElementById('mpBtn');
+    var built=mp?(mp.getAttribute('data-month')||''):'';
+    var busy=false;
+
+    function size(b){return 'ดาวน์โหลด PPT ('+(b/1048576).toFixed(1)+' MB)';}
+    function fail(msg){
+      var m=document.getElementById('rfMsg');
+      if(m) m.textContent='สร้างสไลด์ไม่ได้: '+msg;
+    }
+
+    /* Ask the server to render the deck from data it already has. This runs
+       build_slides.py only - no Apify call, so it costs nothing. */
+    function generate(e){
+      e.preventDefault();
+      if(busy) return;
+      busy=true;
+      var was=lbl.textContent;
+      lbl.textContent='กำลังสร้างสไลด์…';
+      fetch('api/pptx'+(built?'?month='+encodeURIComponent(built):''))
+        .then(function(r){
+          if(!r.ok){
+            return r.json()['catch'](function(){return {};}).then(function(j){
+              throw new Error(j.error||('HTTP '+r.status));
+            });
+          }
+          var cd=r.headers.get('Content-Disposition')||'';
+          var m=cd.match(/filename="([^"]+)"/);
+          return r.blob().then(function(b){
+            var u=URL.createObjectURL(b), t=document.createElement('a');
+            t.href=u; t.download=m?m[1]:'Engagement_Top5.pptx';
+            document.body.appendChild(t); t.click(); t.remove();
+            setTimeout(function(){URL.revokeObjectURL(u);},4000);
+            lbl.textContent=size(b.size);
+            busy=false;
+          });
+        })['catch'](function(err){
+          lbl.textContent=was; busy=false; fail(err.message);
+        });
+    }
+
+    /* Prefer the prebuilt file; fall back to generating it on demand. */
     fetch(href,{method:'HEAD'}).then(function(r){
       if(!r.ok) throw new Error('missing');
-      var kb=parseInt(r.headers.get('Content-Length')||'0',10);
-      if(kb) document.getElementById('pptLbl').textContent=
-        'ดาวน์โหลด PPT ('+(kb/1048576).toFixed(1)+' MB)';
+      var n=parseInt(r.headers.get('Content-Length')||'0',10);
+      if(n) lbl.textContent=size(n);
     })['catch'](function(){
-      a.classList.add('off');
-      a.removeAttribute('href');
-      a.removeAttribute('download');
-      document.getElementById('pptLbl').textContent='ยังไม่มีไฟล์ PPT';
-      a.title='ไฟล์สไลด์ของเดือนนี้ยังไม่ถูกสร้าง — กดโหลดข้อมูลใหม่เพื่อสร้าง';
+      fetch('api/status',{cache:'no-store'}).then(function(r){
+        if(!r.ok) throw new Error('no api');
+        a.removeAttribute('href'); a.removeAttribute('download');
+        lbl.textContent='สร้างไฟล์ PPT';
+        a.title='สร้างสไลด์จากข้อมูลที่ดึงไว้แล้ว — ไม่เสียค่า Apify';
+        a.addEventListener('click',generate);
+      })['catch'](function(){
+        a.classList.add('off');
+        a.removeAttribute('href'); a.removeAttribute('download');
+        lbl.textContent='ยังไม่มีไฟล์ PPT';
+        a.title='หน้านี้เป็นไฟล์นิ่ง — สร้างสไลด์ได้บนเว็บที่รันบน Railway';
+      });
     });
   })();
 
