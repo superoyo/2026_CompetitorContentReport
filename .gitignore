@@ -1,0 +1,14 @@
+# Local Claude Code settings — contains API tokens in permission rules. NEVER commit.
+.claude/settings.local.json
+
+# Secrets
+.env
+*.token
+
+# Python
+__pycache__/
+*.pyc
+
+# Scratch / intermediate scrape output
+raw_agencies_chrome.json
+slides_output/
