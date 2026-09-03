@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 import json, base64, os
+
+ROOT = os.path.dirname(os.path.abspath(__file__))
 from report_config import BRANDS, ANALYSIS, PAGE_URL, CONTENT_SUMMARY, KEY_LEARNING
 
-P = json.load(open('/tmp/processed_8.json'))
+P = json.load(open(os.environ.get('PROCESSED_JSON', '/tmp/processed_8.json')))
 AGG = P['agg']; MET = P['metrics']; TOP5 = P['top5']; DAILY = P['daily']; ALL = P.get('all', {})
 
 NAME = {b[0]: b[1] for b in BRANDS}
@@ -518,7 +520,8 @@ tabsEl.addEventListener('click',e=>{
 </html>'''
 
 html = HTML.replace('__DATA__', data_json)
-out = "/Users/parndoungjai/Desktop/claude jun 18/May_2026_Engagement_Dashboard.html"
+# index.html is the site homepage served by GitHub / Railway
+out = os.path.join(ROOT, "index.html")
 with open(out, 'w', encoding='utf-8') as f:
     f.write(html)
 print("saved", out, round(len(html)/1024), "KB")

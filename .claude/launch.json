@@ -1,6 +1,11 @@
 {
   "version": "0.0.1",
   "configurations": [
-    { "name": "dash", "runtimeExecutable": "bash", "runtimeArgs": ["-c", "cd /tmp/dash_preview && exec python3 -m http.server 8777"], "port": 8777 }
+    {
+      "name": "dashboard",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "cd '/Users/parndoungjai/Desktop/claude jun 18' && exec python3 server.py"],
+      "port": 8000
+    }
   ]
 }
