@@ -431,6 +431,10 @@ const fmt = n => n.toLocaleString('en-US');
 /* Captions are Facebook text: escape before putting them in markup. */
 const esc = t => String(t||'').replace(/&/g,'&amp;').replace(/</g,'&lt;')
                               .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+/* Shared Thai month label, so every control can name the month it acts on. */
+const THM = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
+const thaiMonth = iso => { const p = String(iso||'').split('-');
+  return p.length === 2 ? THM[+p[1]-1] + ' ' + (+p[0] + 543) : (iso || ''); };
 const short = k => DATA.brands.find(b=>b.key===k).name.replace(' Thailand','');
 const order = [...DATA.brands].sort((a,b)=>DATA.agg[b.key].total-DATA.agg[a.key].total);
 const maxTotal = Math.max(...DATA.brands.map(b=>DATA.agg[b.key].total));
@@ -706,7 +710,8 @@ tabsEl.addEventListener('click',e=>{
   document.addEventListener('keydown',function(e){if(e.key==='Escape') openPop(false);});
   function builtNote(){
     return (built && built!==isoSel())
-      ? 'หน้านี้แสดงข้อมูลเดือน '+thai(built)+' · ปฏิทินตั้งไว้ที่ '+thai(isoSel())
+      ? 'หน้านี้และไฟล์ PPT เป็นข้อมูลเดือน '+thai(built)
+        +' · ปฏิทินตั้งไว้ที่ '+thai(isoSel())+' — กดโหลดข้อมูลใหม่เพื่อดึงเดือนนี้'
       : '';
   }
   drawLabel();drawGrid();say(builtNote());
@@ -789,7 +794,7 @@ tabsEl.addEventListener('click',e=>{
     var built=mp?(mp.getAttribute('data-month')||''):'';
     var busy=false;
 
-    function size(b){return 'ดาวน์โหลด PPT ('+(b/1048576).toFixed(1)+' MB)';}
+    function size(b){return 'PPT '+thaiMonth(built)+' ('+(b/1048576).toFixed(1)+' MB)';}
     function fail(msg){
       var m=document.getElementById('rfMsg');
       if(m) m.textContent='สร้างสไลด์ไม่ได้: '+msg;
@@ -834,13 +839,13 @@ tabsEl.addEventListener('click',e=>{
       fetch('api/status',{cache:'no-store'}).then(function(r){
         if(!r.ok) throw new Error('no api');
         a.removeAttribute('href'); a.removeAttribute('download');
-        lbl.textContent='สร้างไฟล์ PPT';
+        lbl.textContent='สร้าง PPT '+thaiMonth(built);
         a.title='สร้างสไลด์จากข้อมูลที่ดึงไว้แล้ว — ไม่เสียค่า Apify';
         a.addEventListener('click',generate);
       })['catch'](function(){
         a.classList.add('off');
         a.removeAttribute('href'); a.removeAttribute('download');
-        lbl.textContent='ยังไม่มีไฟล์ PPT';
+        lbl.textContent='ไม่มี PPT '+thaiMonth(built);
         a.title='หน้านี้เป็นไฟล์นิ่ง — สร้างสไลด์ได้บนเว็บที่รันบน Railway';
       });
     });
