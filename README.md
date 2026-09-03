@@ -39,9 +39,24 @@ Railway ใช้ filesystem แบบชั่วคราว ไฟล์ท�
 | `ccr_reports` | ผลของ (กลุ่ม, เดือน) — ตัวเลขทั้งหมดพร้อมรูปฝังเป็น data URI |
 | `ccr_selection` | แบรนด์ที่ติ๊กไว้ของแต่ละกลุ่ม |
 
-ตั้ง `DATABASE_URL` ชี้ไปที่ Postgres ตัวเดียวกับ Agency Intelligence ได้เลย —
-ตารางคนละชุด ไม่แตะของระบบนั้น ไม่ตั้งค่า = ถอยไปเก็บเป็นไฟล์ใน `/tmp`
-ซึ่งหายไปกับ container (หน้าเว็บบอกตรง ๆ ว่าไม่ถาวร ไม่แกล้งทำเป็นว่าเก็บได้)
+**Postgres ตัวไหนก็ได้** — ระบบนี้อ่านข้อมูลของ Agency Intelligence ผ่าน HTTP
+(`agency_api.py`) ไม่ได้ยิง SQL เข้าตารางของระบบนั้นเลย `DATABASE_URL` จึงใช้แค่
+เก็บสองตารางข้างบนของตัวเอง ไม่ต้องเป็น DB เดียวกับ Agency Intelligence
+
+บน Railway ให้ตั้งเป็น **variable reference** ไม่ใช่พิมพ์ค่าจริงลงไป:
+
+```
+DATABASE_URL = ${{Postgres.DATABASE_URL}}
+```
+
+(`Postgres` = ชื่อ service Postgres ใน project เดียวกัน) การพิมพ์ค่าเต็มลงไปจะพัง
+เงียบ ๆ เมื่อรหัสถูก rotate — อาการคือ `password authentication failed for user "postgres"`
+ถ้าจะใช้ DB ร่วมกับ Agency Intelligence ที่อยู่คนละ project ต้องใช้
+`DATABASE_PUBLIC_URL` ของฝั่งนั้น เพราะ `*.railway.internal` คุยข้าม project ไม่ได้
+
+ไม่ตั้งค่า **หรือต่อไม่ได้** = ถอยไปเก็บเป็นไฟล์ใน `/tmp` ซึ่งหายไปกับ container
+เว็บยังใช้งานได้ปกติ แต่ header จะขึ้นเตือนพร้อมเหตุผลจริงจาก Postgres —
+ไม่แกล้งทำเป็นว่าเก็บถาวรได้ และไม่ล้มทั้ง container เพราะ DB ตัวเดียว
 
 สถานะของเดือนบนปฏิทิน:
 
