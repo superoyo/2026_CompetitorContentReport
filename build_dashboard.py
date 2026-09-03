@@ -699,7 +699,7 @@ tabsEl.addEventListener('click',e=>{
     var t=e.target;
     if(!t||t.className.indexOf('mp-m')<0||t.disabled) return;
     sel={y:viewY,m:+t.getAttribute('data-m')};
-    drawLabel();drawGrid();openPop(false);
+    drawLabel();drawGrid();openPop(false);publish();
     if(isoSel()!==(mpBtn.getAttribute('data-month')||''))
       say('เลือก '+TH[sel.m-1]+' '+(sel.y+543)+' — กดโหลดข้อมูลใหม่เพื่อดึงเดือนนี้');
     else say('');
@@ -710,11 +710,16 @@ tabsEl.addEventListener('click',e=>{
   document.addEventListener('keydown',function(e){if(e.key==='Escape') openPop(false);});
   function builtNote(){
     return (built && built!==isoSel())
-      ? 'หน้านี้และไฟล์ PPT เป็นข้อมูลเดือน '+thai(built)
-        +' · ปฏิทินตั้งไว้ที่ '+thai(isoSel())+' — กดโหลดข้อมูลใหม่เพื่อดึงเดือนนี้'
+      ? 'หน้านี้แสดงข้อมูลเดือน '+thai(built)+' · ปฏิทินเลือก '+thai(isoSel())
+        +' — ปุ่มโหลดข้อมูลและปุ่ม PPT จะใช้เดือนที่เลือก'
       : '';
   }
-  drawLabel();drawGrid();say(builtNote());
+  /* Announce the selection so the PPT button targets the same month. */
+  function publish(){
+    mpBtn.setAttribute('data-sel', isoSel());
+    document.dispatchEvent(new CustomEvent('fbdash:month',{detail:isoSel()}));
+  }
+  drawLabel();drawGrid();say(builtNote());publish();
 
   /* ---------- refresh ---------- */
   function lbl(t){btn.querySelector('.rf-lbl').textContent=t;}
@@ -789,66 +794,90 @@ tabsEl.addEventListener('click',e=>{
   (function(){
     var a=document.getElementById('pptBtn'), lbl=document.getElementById('pptLbl');
     if(!a) return;
-    var href=a.getAttribute('href')||'';
     var mp=document.getElementById('mpBtn');
     var built=mp?(mp.getAttribute('data-month')||''):'';
-    var busy=false;
+    var ENM=['January','February','March','April','May','June',
+             'July','August','September','October','November','December'];
+    var target=built, busy=false, handler=null;
 
-    function size(b){return 'PPT '+thaiMonth(built)+' ('+(b/1048576).toFixed(1)+' MB)';}
-    function fail(msg){
-      var m=document.getElementById('rfMsg');
-      if(m) m.textContent='สร้างสไลด์ไม่ได้: '+msg;
+    /* Must match the name build_slides.py writes. */
+    function deckName(iso){
+      var p=String(iso||'').split('-');
+      return p.length===2 ? ENM[+p[1]-1]+'_'+p[0]+'_Engagement_Top5.pptx' : '';
     }
+    function note(m){var el=document.getElementById('rfMsg'); if(el) el.textContent=m;}
+    function setHandler(fn){
+      if(handler){a.removeEventListener('click',handler);handler=null;}
+      if(fn){handler=fn;a.addEventListener('click',fn);}
+    }
+    function mb(n){return ' ('+(n/1048576).toFixed(1)+' MB)';}
 
-    /* Ask the server to render the deck from data it already has. This runs
+    /* Ask the server to render the deck from data it already holds. Runs
        build_slides.py only - no Apify call, so it costs nothing. */
     function generate(e){
       e.preventDefault();
       if(busy) return;
       busy=true;
-      var was=lbl.textContent;
-      lbl.textContent='กำลังสร้างสไลด์…';
-      fetch('api/pptx'+(built?'?month='+encodeURIComponent(built):''))
-        .then(function(r){
-          if(!r.ok){
-            return r.json()['catch'](function(){return {};}).then(function(j){
-              throw new Error(j.error||('HTTP '+r.status));
-            });
-          }
-          var cd=r.headers.get('Content-Disposition')||'';
-          var m=cd.match(/filename="([^"]+)"/);
-          return r.blob().then(function(b){
-            var u=URL.createObjectURL(b), t=document.createElement('a');
-            t.href=u; t.download=m?m[1]:'Engagement_Top5.pptx';
-            document.body.appendChild(t); t.click(); t.remove();
-            setTimeout(function(){URL.revokeObjectURL(u);},4000);
-            lbl.textContent=size(b.size);
-            busy=false;
+      var iso=target, was=lbl.textContent;
+      lbl.textContent='กำลังสร้าง PPT '+thaiMonth(iso)+'…';
+      note('');
+      fetch('api/pptx?month='+encodeURIComponent(iso)).then(function(r){
+        if(!r.ok){
+          return r.json()['catch'](function(){return {};}).then(function(j){
+            throw new Error(j.error||('HTTP '+r.status));
           });
-        })['catch'](function(err){
-          lbl.textContent=was; busy=false; fail(err.message);
+        }
+        return r.blob().then(function(b){
+          var u=URL.createObjectURL(b), t=document.createElement('a');
+          t.href=u; t.download=deckName(iso);
+          document.body.appendChild(t); t.click(); t.remove();
+          setTimeout(function(){URL.revokeObjectURL(u);},4000);
+          busy=false;
+          if(target===iso) lbl.textContent='PPT '+thaiMonth(iso)+mb(b.size);
         });
+      })['catch'](function(err){
+        busy=false; lbl.textContent=was;
+        note('สร้าง PPT '+thaiMonth(iso)+' ไม่ได้: '+err.message);
+      });
     }
 
-    /* Prefer the prebuilt file; fall back to generating it on demand. */
-    fetch(href,{method:'HEAD'}).then(function(r){
-      if(!r.ok) throw new Error('missing');
-      var n=parseInt(r.headers.get('Content-Length')||'0',10);
-      if(n) lbl.textContent=size(n);
-    })['catch'](function(){
-      fetch('api/status',{cache:'no-store'}).then(function(r){
-        if(!r.ok) throw new Error('no api');
-        a.removeAttribute('href'); a.removeAttribute('download');
-        lbl.textContent='สร้าง PPT '+thaiMonth(built);
-        a.title='สร้างสไลด์จากข้อมูลที่ดึงไว้แล้ว — ไม่เสียค่า Apify';
-        a.addEventListener('click',generate);
+    /* Follow the picker: the button always acts on the selected month. */
+    function retarget(iso){
+      target=iso||built;
+      var mine=target, file=deckName(mine);
+      var stale=function(){return target!==mine;};
+      a.classList.remove('off');
+      a.removeAttribute('href'); a.removeAttribute('download');
+      a.title='';
+      setHandler(null);
+      lbl.textContent='PPT '+thaiMonth(mine);
+      if(!file) return;
+
+      fetch(file,{method:'HEAD'}).then(function(r){
+        if(!r.ok) throw new Error('missing');
+        if(stale()) return;
+        a.setAttribute('href',file); a.setAttribute('download','');
+        var n=parseInt(r.headers.get('Content-Length')||'0',10);
+        lbl.textContent='PPT '+thaiMonth(mine)+(n?mb(n):'');
       })['catch'](function(){
-        a.classList.add('off');
-        a.removeAttribute('href'); a.removeAttribute('download');
-        lbl.textContent='ไม่มี PPT '+thaiMonth(built);
-        a.title='หน้านี้เป็นไฟล์นิ่ง — สร้างสไลด์ได้บนเว็บที่รันบน Railway';
+        if(stale()) return;
+        fetch('api/status',{cache:'no-store'}).then(function(r){
+          if(!r.ok) throw new Error('no api');
+          if(stale()) return;
+          lbl.textContent='สร้าง PPT '+thaiMonth(mine);
+          a.title='สร้างสไลด์เดือน'+thaiMonth(mine)+' จากข้อมูลบนเซิร์ฟเวอร์ — ไม่เสียค่า Apify';
+          setHandler(generate);
+        })['catch'](function(){
+          if(stale()) return;
+          a.classList.add('off');
+          lbl.textContent='ไม่มี PPT '+thaiMonth(mine);
+          a.title='หน้านี้เป็นไฟล์นิ่ง — สร้างสไลด์ได้บนเว็บที่รันบน Railway';
+        });
       });
-    });
+    }
+
+    document.addEventListener('fbdash:month',function(e){retarget(e.detail);});
+    retarget(mp?(mp.getAttribute('data-sel')||built):built);
   })();
 
   /* ---------- Apify cost estimate ---------- */
