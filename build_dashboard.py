@@ -14,6 +14,7 @@ from disk.
 import json, os
 
 import month_util
+import report_config
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 
@@ -26,6 +27,23 @@ else:
     import dashboard_data
     DATA = dashboard_data.build()
     M = month_util.info()
+
+
+# The prose in report_config.py is hand-written about particular pages in one
+# particular month. Under another group it puts PAO's conclusions beneath
+# Shokubutsu's name; in another month it is quietly out of date. Filter it here,
+# at render, rather than where the payload is built — a month stored before this
+# existed then comes out clean too, with no second trip to Apify.
+def _authored(block):
+    if M['iso'] != report_config.AUTHORED_MONTH:
+        return {}
+    keys = {b.get('key') for b in (DATA.get('brands') or [])}
+    return {k: v for k, v in (block or {}).items() if k in keys}
+
+
+DATA['ai'] = _authored(DATA.get('ai'))
+DATA['summary'] = _authored(DATA.get('summary'))
+DATA['keylearning'] = _authored(DATA.get('keylearning'))
 
 data_json = json.dumps(DATA, ensure_ascii=False)
 
@@ -422,13 +440,13 @@ HTML = r'''<!DOCTYPE html>
     <div id="allGrid"></div>
   </div>
 
-  <div class="section-title">วิเคราะห์คอนเทนต์รายเพจ &amp; ข้อเสนอแนะเดือนถัดไป</div>
-  <div class="section-sub">เลือกเพจเพื่อดูบทวิเคราะห์คอนเทนต์ทั้งหมด, กล่องข้อเสนอแนะ และ Top 5 คอนเทนต์</div>
+  <div class="section-title" id="postsTitle">วิเคราะห์คอนเทนต์รายเพจ &amp; ข้อเสนอแนะเดือนถัดไป</div>
+  <div class="section-sub" id="postsSub">เลือกเพจเพื่อดูบทวิเคราะห์คอนเทนต์ทั้งหมด, กล่องข้อเสนอแนะ และ Top 5 คอนเทนต์</div>
   <div class="tabs" id="tabs"></div>
   <div class="ai-box" id="aiBox"></div>
   <div class="posts" id="posts"></div>
 
-  <div class="card sum-box">
+  <div class="card sum-box" id="sumBox" hidden>
     <h2>สรุปวิเคราะห์คอนเทนต์ — Top 3 &amp; ภาพรวมทั้งเดือนของแต่ละเพจ</h2>
     <div class="hint">Top 3 คอนเทนต์เด่นของแต่ละเพจว่าเกี่ยวกับอะไรและสื่อสารอะไร พร้อมภาพรวมความเคลื่อนไหวและความหลากหลายของคอนเทนต์ตลอดเดือน__M_TH__ (มองเชิงเนื้อหา ไม่อิงตัวเลข Engagement)</div>
     <div class="sum-grid" id="sumGrid"></div>
@@ -557,11 +575,22 @@ new Chart(document.getElementById('lineChart'),{
 const tabsEl = document.getElementById('tabs');
 const postsEl = document.getElementById('posts');
 const aiEl = document.getElementById('aiBox');
+/* No page in this report has authored analysis, so the section is Top 5 posts
+   and nothing else — say that in the heading rather than promising commentary
+   and then repeating "not written yet" under every tab. */
+const HAS_AI = Object.keys(DATA.ai||{}).length > 0;
+if(!HAS_AI){
+  aiEl.hidden = true;
+  document.getElementById('postsTitle').textContent = 'คอนเทนต์เด่นรายเพจ';
+  document.getElementById('postsSub').textContent =
+    'เลือกเพจเพื่อดู Top 5 คอนเทนต์ที่ได้ Engagement สูงสุดของเดือน';
+}
 tabsEl.innerHTML = order.map((b,i)=>`
   <div class="tab${i===0?' active':''}" data-key="${b.key}" style="${i===0?'background:'+b.color:''}">
     <span class="tdot" style="background:${b.color}"></span>${b.name}</div>`).join('');
 
 function renderAI(key){
+  if(!HAS_AI) return;                     // the box is not on the page at all
   const b = DATA.brands.find(x=>x.key===key);
   const g = DATA.agg[key];
   /* The prose in report_config.py is written by hand for specific pages, so
@@ -627,6 +656,10 @@ document.getElementById('allGrid').innerHTML = order.map(b=>{
 }).join('');
 
 // ---- Content summary (bottom box): Top 3 + month overview per page ----
+/* Hand-written per page for one month (see report_config.AUTHORED_MONTH). With
+   none of it applying to this report, the box would be a heading over nothing —
+   leave it out rather than imply the writing is missing. */
+document.getElementById('sumBox').hidden = !Object.keys(DATA.summary||{}).length;
 document.getElementById('sumGrid').innerHTML = order.map(b=>{
   const s = DATA.summary[b.key]; if(!s) return '';
   return `<div class="sum-card" style="border-left-color:${b.color}">

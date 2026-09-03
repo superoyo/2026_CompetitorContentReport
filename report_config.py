@@ -1,5 +1,18 @@
 # -*- coding: utf-8 -*-
-"""Shared config for May 2026 engagement report: brand list + authored analysis."""
+"""Shared config for May 2026 engagement report: brand list + authored analysis.
+
+Everything below the brand list is prose someone wrote by hand, about specific
+pages in one specific month. It is not derived from the data and does not
+travel: the same sentences under another group, or the same group in another
+month, are simply wrong.
+
+AUTHORED_MONTH is what stops that happening. The dashboard shows this writing
+only when the report it is rendering is the month it was written for, and only
+for pages it actually covers; otherwise the boxes are left out. Rewriting the
+prose for a new month means updating this stamp along with it.
+"""
+
+AUTHORED_MONTH = "2026-05"
 
 # key, display name, initial letter, hex color
 BRANDS = [

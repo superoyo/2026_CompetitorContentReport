@@ -12,6 +12,7 @@ import os
 
 import brandset
 import month_util
+
 from report_config import ANALYSIS, CONTENT_SUMMARY, KEY_LEARNING
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
