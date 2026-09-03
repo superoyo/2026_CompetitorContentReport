@@ -324,6 +324,88 @@ def run_pipeline(group, month, brands):
             JOB["last_finished"] = time.strftime("%Y-%m-%d %H:%M")
 
 
+# ------------------------------------------------- commentary for a saved month
+
+def processed_from_payload(group, month, payload):
+    """Rebuild just enough of process.py's output for analyse.py to read.
+
+    A stored month already holds everything the commentary is written from —
+    the aggregates, the format and day-of-week metrics, and the top posts with
+    their captions. Re-scraping to get at it would spend Apify credit on data
+    we already paid for once.
+
+    The one thing the payload drops is which brand is ours, so that comes from
+    Agency Intelligence, live — the pin may well have moved since.
+    """
+    try:
+        owned = {b["key"] for b in agency_api.brands(group) if b.get("owned")}
+    except agency_api.AgencyError:
+        owned = set()
+    return {
+        "month": month,
+        "group_id": group,
+        "brands": [dict(b, owned=b["key"] in owned) for b in payload.get("brands") or []],
+        "agg": payload.get("agg") or {},
+        "metrics": payload.get("metrics") or {},
+        "top5": payload.get("top5") or {},
+    }
+
+
+def run_analysis(group, month):
+    """Write commentary for a month already stored, and keep it."""
+    shim = "/tmp/ccr_reanalyse.json"
+    try:
+        with JOB_LOCK:
+            JOB["step"] = "อ่านข้อมูลเดือนที่เก็บไว้"
+        saved = store.load_report(group, month)
+        if not saved:
+            raise RuntimeError("ยังไม่มีข้อมูลเดือนนี้ — ต้องกดโหลดข้อมูลใหม่ก่อน")
+        payload = saved["payload"]
+        with open(shim, "w", encoding="utf-8") as f:
+            json.dump(processed_from_payload(group, month, payload), f, ensure_ascii=False)
+
+        with JOB_LOCK:
+            JOB["step"] = "เขียนบทวิเคราะห์"
+        _log("=== เขียนบทวิเคราะห์ %s · เดือน %s (ไม่เรียก Apify) ===" % (group, month))
+        proc = subprocess.run(
+            [sys.executable, "analyse.py"],
+            cwd=ROOT, timeout=900, capture_output=True, text=True,
+            env=dict(os.environ, PROCESSED_JSON=shim, PYTHONUNBUFFERED="1"),
+        )
+        for line in (proc.stdout or "").splitlines()[-20:]:
+            _log(line)
+        if proc.returncode != 0:
+            raise RuntimeError(explain(proc.stderr))
+
+        with open(shim, encoding="utf-8") as f:
+            got = (json.load(f) or {}).get("analysis")
+        if not got:
+            raise RuntimeError("ไม่ได้บทวิเคราะห์กลับมา — ดู log ด้านบน")
+
+        payload["ai"] = got.get("ai") or {}
+        payload["summary"] = got.get("summary") or {}
+        payload["keylearning"] = got.get("keylearning") or {}
+        payload["analysis_source"] = "generated"
+        store.save_report(group, month, saved.get("brands") or [], payload)
+        drop_cached_page(group, month)
+        with JOB_LOCK:
+            JOB["step"] = "เสร็จสมบูรณ์"
+            JOB["error"] = ""
+    except Exception as exc:
+        _log("ERROR: %s" % exc)
+        with JOB_LOCK:
+            JOB["error"] = str(exc)
+            JOB["step"] = "ล้มเหลว"
+    finally:
+        try:
+            os.remove(shim)
+        except OSError:
+            pass
+        with JOB_LOCK:
+            JOB["running"] = False
+            JOB["last_finished"] = time.strftime("%Y-%m-%d %H:%M")
+
+
 class Handler(http.server.SimpleHTTPRequestHandler):
     """Static handler pinned to ROOT, with the dashboard API bolted on."""
 
@@ -502,6 +584,32 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 self._json(400, {"error": "ต้องเลือกอย่างน้อยหนึ่งแบรนด์"}); return
             store.save_selection(group, [str(k) for k in keys])
             self._json(200, {"saved": True, "brands": len(keys)})
+            return
+
+        if route.endswith("/api/analyse"):
+            # Same secret as refresh: it spends money, just far less of it.
+            if not self._authorised():
+                self._json(401, {"error": "refresh key ไม่ถูกต้อง"}); return
+            try:
+                body = self._body()
+                group = str(body.get("group") or "").strip()
+                month = str(body.get("month") or "").strip()
+                month_util.parse(month)
+            except ValueError as exc:
+                self._json(400, {"error": str(exc)}); return
+            except Exception:
+                self._json(400, {"error": "อ่านคำขอไม่สำเร็จ"}); return
+            if not group:
+                self._json(400, {"error": "ต้องระบุ group"}); return
+            if not store.load_report(group, month):
+                self._json(404, {"error": "ยังไม่มีข้อมูลเดือนนี้ — กดโหลดข้อมูลใหม่ก่อน"}); return
+            with JOB_LOCK:
+                if JOB["running"]:
+                    self._json(409, {"error": "กำลังทำงานอยู่แล้ว", "step": JOB["step"]}); return
+                JOB.update(running=True, step="กำลังเริ่ม", error="", log=[], month=month,
+                           group=group, started=time.strftime("%Y-%m-%d %H:%M"))
+            threading.Thread(target=run_analysis, args=(group, month), daemon=True).start()
+            self._json(202, {"started": True, "group": group, "month": month})
             return
 
         if not route.endswith("/api/refresh"):

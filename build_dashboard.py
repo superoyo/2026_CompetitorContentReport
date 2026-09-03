@@ -321,6 +321,11 @@ HTML = r'''<!DOCTYPE html>
   .bd-go:disabled{opacity:.45;cursor:not-allowed}
   .bd-cancel{font-family:var(--head);font-size:13px;font-weight:700;color:#5A6675;background:var(--panel2);
     border:1px solid var(--line);padding:10px 18px;border-radius:999px;cursor:pointer}
+  .an-btn{font-family:var(--head);font-size:13px;font-weight:700;color:#6B3FA0;background:#F3EDFB;
+    border:1px solid #DCCBF2;padding:10px 16px;border-radius:999px;cursor:pointer;display:flex;
+    align-items:center;gap:7px;box-shadow:var(--shadow);white-space:nowrap;transition:.15s}
+  .an-btn:hover:not(:disabled){background:#EADFF8;border-color:#6B3FA0;transform:translateY(-1px)}
+  .an-btn:disabled{opacity:.55;cursor:progress;transform:none}
   .pt-btn{font-family:var(--head);font-size:13px;font-weight:700;color:#0B7B57;background:#E8F7F0;
     border:1px solid #BEE9D8;padding:10px 16px;border-radius:999px;cursor:pointer;display:flex;
     align-items:center;gap:7px;box-shadow:var(--shadow);white-space:nowrap;transition:.15s;text-decoration:none}
@@ -385,6 +390,9 @@ HTML = r'''<!DOCTYPE html>
           <a id="pptBtn" class="pt-btn" href="__PPT_FILE__" download>
             <span>⬇</span><span id="pptLbl">ดาวน์โหลด PPT</span>
           </a>
+          <button id="anBtn" class="an-btn" type="button" hidden>
+            <span>✨</span><span id="anLbl">เขียนบทวิเคราะห์</span>
+          </button>
           <button id="refreshBtn" class="rf-btn" type="button">
             <span class="rf-sp"></span><span class="rf-lbl">โหลดข้อมูลใหม่</span>
           </button>
@@ -1070,6 +1078,54 @@ window.FBDASH = {group:'', months:{}, brands:[], ready:false};
     btn.disabled=true;
     say('หน้านี้เป็นไฟล์นิ่ง — เลือกเดือนแล้วกดโหลดได้บนเว็บที่รันบน Railway');
   });
+
+  /* ---------- write the commentary for a month already fetched ----------
+     The prose comes from the stored numbers, so this needs Claude but not
+     Apify. Offered only where it applies: this month has data and no
+     commentary yet. */
+  (function(){
+    var ab=document.getElementById('anBtn'), al=document.getElementById('anLbl');
+    if(!ab) return;
+    var already=Object.keys(DATA.ai||{}).length>0;
+    var thisMonth=(mpBtn.getAttribute('data-month')||'');
+    function show(){
+      var group=(window.FBDASH||{}).group||'';
+      ab.hidden = !(group && !already && have(thisMonth));
+    }
+    document.addEventListener('fbdash:months',show);
+    show();
+
+    ab.addEventListener('click',function(){
+      var group=(window.FBDASH||{}).group||'';
+      if(!group) return;
+      var k=sessionStorage.getItem(SK);
+      if(!k){
+        k=prompt('ใส่ Refresh key (ค่าเดียวกับตัวแปร REFRESH_KEY บนเซิร์ฟเวอร์)');
+        if(!k) return;
+        sessionStorage.setItem(SK,k);
+      }
+      ab.disabled=true; al.textContent='กำลังเขียน…';
+      say('ให้ Claude เขียนบทวิเคราะห์เดือน '+thai(thisMonth)+' — ไม่เรียก Apify');
+      fetch('api/analyse',{
+        method:'POST',
+        headers:{'X-Refresh-Key':k,'Content-Type':'application/json'},
+        body:JSON.stringify({group:group,month:thisMonth})
+      }).then(function(r){
+        if(r.status===401){sessionStorage.removeItem(SK);ab.disabled=false;
+          al.textContent='เขียนบทวิเคราะห์';say('Refresh key ไม่ถูกต้อง ลองอีกครั้ง');return;}
+        if(!r.ok){
+          return r.json()['catch'](function(){return {};}).then(function(j){
+            ab.disabled=false; al.textContent='เขียนบทวิเคราะห์';
+            say(j.error||('เริ่มงานไม่สำเร็จ ('+r.status+')'));
+          });
+        }
+        track();
+      })['catch'](function(){
+        ab.disabled=false; al.textContent='เขียนบทวิเคราะห์';
+        say('เชื่อมต่อเซิร์ฟเวอร์ไม่ได้');
+      });
+    });
+  })();
 
   btn.addEventListener('click',function(){
     var group=(window.FBDASH||{}).group||'';
