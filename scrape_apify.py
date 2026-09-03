@@ -1,10 +1,12 @@
 # -*- coding: utf-8 -*-
-"""Scrape one month of posts for 8 FB pages via Apify facebook-posts-scraper.
+"""Scrape one month of posts for the chosen FB pages via Apify.
 
 The month comes from $REPORT_MONTH (YYYY-MM); see month_util.py.
+The pages come from $BRANDSET_JSON; see brandset.py.
 """
 import json, os, sys, time, urllib.request, urllib.error
 
+import brandset
 import month_util
 
 # Token is supplied per run via the environment — never hardcoded/committed.
@@ -14,19 +16,12 @@ if not TOKEN:
     sys.exit("ERROR: set APIFY_TOKEN in the environment before running.")
 ACTOR = "apify~facebook-posts-scraper"
 
-PAGES = [
-    "https://www.facebook.com/FinelineThailand/",
-    "https://www.facebook.com/HygieneThailand/",
-    "https://www.facebook.com/DownyThailand",
-    "https://www.facebook.com/PaoSociety/",
-    "https://www.facebook.com/OMOThailand/",
-    "https://www.facebook.com/ComfortZoneThailand/",
-    "https://www.facebook.com/BreezeThailand/",
-    "https://www.facebook.com/ATTACKFamily/",
-]
+BRANDS = brandset.load()
+PAGES = [b["url"] for b in BRANDS]
 
 M = month_util.info()
 print("MONTH", M["iso"], M["en_label"], "window", M["scrape_from"], "->", M["scrape_to"], flush=True)
+print("PAGES", len(PAGES), "-", ", ".join(b["key"] for b in BRANDS), flush=True)
 
 payload = {
     "startUrls": [{"url": u} for u in PAGES],

@@ -2,3 +2,7 @@
 Pillow>=10.0
 # build_slides.py writes the PPTX deck
 python-pptx>=0.6.23
+# store.py keeps fetched months in Postgres — Railway's disk does not survive
+# a deploy, and the month picker has to know what has already been fetched
+psycopg[binary]>=3.1
+psycopg_pool>=3.2

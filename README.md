@@ -1,12 +1,58 @@
 # 2026 Competitor Content Report
 
-Pipeline สร้างรายงาน Engagement รายเดือนของเพจคู่แข่งกลุ่ม Home & Personal Care บน Facebook
+Pipeline สร้างรายงาน Engagement รายเดือนของเพจคู่แข่งบน Facebook
 ผลลัพธ์เป็น **PPTX สรุป Top 5 ของแต่ละเพจ** และ **HTML dashboard** แบบ self-contained
 
-## เพจที่ติดตาม (8 เพจ)
+## เพจที่ติดตาม — มาจาก Agency Intelligence
 
-Fineline Thailand · Hygiene Thailand · Downy Thailand · PAO Society ·
-OMO Thailand · Comfort Zone Thailand · Breeze Thailand · ATTACK Family
+เดิมเป็นรายชื่อ 8 เพจตายตัวในโค้ด (กลุ่ม PAO) ตอนนี้มาจากหน้า **Brand Asset**
+ของ Product Group ที่เลือก ใน Agency Intelligence — ที่นั่นคือที่ที่มีการแก้ไขจริง
+การเก็บสำเนาไว้ที่นี่ด้วยทำให้รายงานล้าสมัยเงียบ ๆ ทุกครั้งที่มีคนแก้ที่โน่น
+
+```
+dropdown มุมซ้ายบน  →  เลือก Product Group
+      ↓
+popup ติ๊กเลือกแบรนด์  →  จำไว้ต่อกลุ่ม ครั้งต่อไปเปิดมาติ๊กไว้ให้เลย
+      ↓
+ตารางขึ้นชื่อแบรนด์ ค่ายังว่าง  →  กดโหลดข้อมูลใหม่จึงจะมีตัวเลข
+```
+
+รับเฉพาะแบรนด์ที่มีลิงก์ Facebook — แบรนด์ที่ยังไม่ใส่ลิงก์จะไม่ปรากฏในรายการ
+`key` ของแต่ละแบรนด์มาจาก path ของเพจ (`/PaoSociety/` → `PaoSociety`) ไม่ใช่ชื่อ
+ที่ผู้ใช้พิมพ์ เพราะชื่อแก้เมื่อไหร่ก็ได้ แต่คีย์ต้องคงที่ ไม่งั้นข้อมูลข้ามเดือน join กันไม่ติด
+
+| ตัวแปร | ค่า |
+|---|---|
+| `AGENCY_API_BASE` | เช่น `https://agencyintelligence.fareastfameline.com` |
+| `AGENCY_SERVICE_KEY` | ต้องตรงกับ `REPORT_SERVICE_KEY` ฝั่ง Agency Intelligence |
+
+ไม่ตั้งค่าสองตัวนี้ = dropdown จะบอกว่าดึงรายชื่อกลุ่มไม่ได้ ส่วนการรันจาก command
+line ยังใช้รายชื่อ 8 เพจเดิมได้ตามปกติ
+
+## ฐานข้อมูล — จำว่าดึงเดือนไหนไปแล้ว
+
+Railway ใช้ filesystem แบบชั่วคราว ไฟล์ที่สร้างจะหายเมื่อ redeploy แต่ปฏิทินต้อง
+ตอบให้ได้ว่ากลุ่มนี้มีข้อมูลเดือนไหนแล้ว ผลลัพธ์แต่ละเดือนจึงเก็บลง Postgres
+
+| ตาราง | เก็บอะไร |
+|---|---|
+| `ccr_reports` | ผลของ (กลุ่ม, เดือน) — ตัวเลขทั้งหมดพร้อมรูปฝังเป็น data URI |
+| `ccr_selection` | แบรนด์ที่ติ๊กไว้ของแต่ละกลุ่ม |
+
+ตั้ง `DATABASE_URL` ชี้ไปที่ Postgres ตัวเดียวกับ Agency Intelligence ได้เลย —
+ตารางคนละชุด ไม่แตะของระบบนั้น ไม่ตั้งค่า = ถอยไปเก็บเป็นไฟล์ใน `/tmp`
+ซึ่งหายไปกับ container (หน้าเว็บบอกตรง ๆ ว่าไม่ถาวร ไม่แกล้งทำเป็นว่าเก็บได้)
+
+สถานะของเดือนบนปฏิทิน:
+
+| สถานะ | หน้าตา | กดแล้วเกิดอะไร |
+|---|---|---|
+| มีข้อมูล | ขอบเขียว | เปิดข้อมูลเดือนนั้นทันที ไม่เสียค่า Apify |
+| ยังไม่มี | ขอบจาง | บอกว่าต้องกดโหลดข้อมูลใหม่ก่อน |
+| ยังไม่ถึง | จางลง กดไม่ได้ | — |
+
+กดโหลดข้อมูลใหม่ทับเดือนที่มีข้อมูลอยู่แล้ว จะถามยืนยันก่อน เพราะข้อมูลเดิม
+จะถูกแทนที่และมีค่าใช้จ่าย Apify
 
 ## Pipeline
 
@@ -16,8 +62,12 @@ OMO Thailand · Comfort Zone Thailand · Breeze Thailand · ATTACK Family
 | `process.py` | กรองตามเดือน คำนวณ engagement จัดอันดับ |
 | `crop.py` | จัดการรูปภาพประกอบโพสต์ |
 | `build_slides.py` | สร้างสไลด์ PPTX (Top 5 ต่อเพจ) |
-| `build_dashboard.py` | สร้าง HTML dashboard |
+| `dashboard_data.py` | รวมผลประมวลผลเป็น payload ก้อนเดียวที่หน้าเว็บใช้ (รูปฝังในตัว) |
+| `build_dashboard.py` | render payload เป็น HTML — จากเดือนที่เพิ่งประมวลผล หรือจากที่เก็บไว้ |
 | `report_config.py` | เนื้อหาวิเคราะห์คอนเทนต์ + suggestion next step |
+| `brandset.py` | รายชื่อแบรนด์ของรอบนี้ (`$BRANDSET_JSON`) — เดิมเป็น literal ในสามไฟล์ |
+| `agency_api.py` | อ่าน Product Group + คู่แข่งจาก Agency Intelligence |
+| `store.py` | เก็บผลแต่ละ (กลุ่ม, เดือน) ลง Postgres |
 
 ## วิธีรัน
 
@@ -75,11 +125,17 @@ Endpoint ที่ปุ่มเรียก:
 
 | Method | Path | ผลลัพธ์ |
 |---|---|---|
+| `GET` | `/?group=&month=` | หน้า dashboard ของกลุ่มและเดือนนั้น |
+| `GET` | `/api/groups` | Product Group ทั้งหมด (ผ่าน Agency Intelligence) |
+| `GET` | `/api/groups/<id>/brands` | แบรนด์ของกลุ่ม + ที่ติ๊กไว้ครั้งก่อน |
+| `POST` | `/api/groups/<id>/brands` | บันทึกแบรนด์ที่ติ๊ก |
+| `GET` | `/api/groups/<id>/months` | เดือนที่มีข้อมูลแล้ว |
 | `POST` | `/api/refresh` | เริ่มงาน (ต้องมี header `X-Refresh-Key`) |
 | `GET` | `/api/status` | สถานะงานปัจจุบัน |
 
-> Railway ใช้ filesystem แบบชั่วคราว — `index.html` ที่สร้างใหม่จะหายเมื่อ redeploy
-> ถ้าต้องการเก็บถาวร ให้ commit ไฟล์ที่ได้กลับเข้า repo
+> Railway ใช้ filesystem แบบชั่วคราว หน้าเว็บที่ render แล้วจึงเป็นแค่ cache ใน `/tmp`
+> ตัวข้อมูลจริงอยู่ใน Postgres — เปิดเดือนเดิมอีกครั้งจะ render ใหม่จากที่เก็บไว้
+> ไม่เรียก Apify ซ้ำ
 
 ## ปุ่มดาวน์โหลด PPT
 

@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import json, os
 
+import brandset
 import month_util
 from pptx import Presentation
 from pptx.util import Inches, Pt
@@ -10,7 +11,7 @@ from pptx.enum.shapes import MSO_SHAPE
 from pptx.chart.data import CategoryChartData
 from pptx.enum.chart import XL_CHART_TYPE
 from pptx.oxml.ns import qn
-from report_config import BRANDS, ANALYSIS
+from report_config import ANALYSIS
 
 # ---------- palette ----------
 DARK = RGBColor(0x0B, 0x14, 0x22)
@@ -46,10 +47,14 @@ M = month_util.info()
 P = json.load(open(os.environ.get('PROCESSED_JSON', '/tmp/processed_8.json')))
 AGG = P['agg']; MET = P['metrics']; TOP5 = P['top5']
 
-NAME = {b[0]: b[1] for b in BRANDS}
-LETTER = {b[0]: b[2] for b in BRANDS}
-COLOR = {b[0]: b[3] for b in BRANDS}
-ORDER = sorted([b[0] for b in BRANDS], key=lambda k: AGG[k]['total'], reverse=True)
+# The set the run actually covered, recorded by process.py. Falling back to
+# brandset.load() keeps a hand-run of this step working against older output.
+BRANDS = P.get('brands') or brandset.load()
+NAME = {b['key']: b['name'] for b in BRANDS}
+LETTER = {b['key']: b['letter'] for b in BRANDS}
+COLOR = {b['key']: b['color'] for b in BRANDS}
+ORDER = sorted([b['key'] for b in BRANDS if b['key'] in AGG],
+               key=lambda k: AGG[k]['total'], reverse=True)
 
 prs = Presentation()
 prs.slide_width = SLIDE_W
@@ -154,10 +159,10 @@ add_ring(s, 13.7, -0.3, 2.6, RING, 1.6); add_ring(s, 13.0, 0.7, 1.1, RING, 1.6);
 add_rect(s, 1.0, 2.05, 0.9, 0.09, fill=ACCENT)
 add_text(s, 1.0, 2.25, 11.3, 0.5, "รายงานสรุป Engagement บน Facebook", size=19, color=hx('#9FC9DE'), bold=True, font=HEAD_FONT)
 add_text(s, 1.0, 2.72, 11.5, 1.3, "Top 5 คอนเทนต์ยอด Engagement สูงสุด", size=42, color=WHITE, bold=True, font=HEAD_FONT)
-add_text(s, 1.0, 3.7, 11.3, 0.6, "ประจำเดือน%s %d  (%s)  ·  8 เพจ" % (M["th_full"], M["be_year"], M["en_label"]), size=19, color=hx('#CFE7F0'), font=HEAD_FONT)
+add_text(s, 1.0, 3.7, 11.3, 0.6, "ประจำเดือน%s %d  (%s)  ·  %d เพจ" % (M["th_full"], M["be_year"], M["en_label"], len(BRANDS)), size=19, color=hx('#CFE7F0'), font=HEAD_FONT)
 
 bx, by = 1.0, 4.75
-for key in [b[0] for b in BRANDS]:
+for key in [b['key'] for b in BRANDS]:
     add_badge(s, bx, by, 0.5, hx(COLOR[key]), LETTER[key], fs=15)
     add_text(s, bx - 0.62, by + 0.56, 1.74, 0.5, NAME[key].replace(' Thailand', ''), size=10.5,
              color=hx('#CFE7F0'), align=PP_ALIGN.CENTER, wrap=True, font=BODY_FONT)
@@ -250,13 +255,18 @@ for key in ORDER:
     add_text(s, 0.6, CARD_TOP + 4.95 + 0.12, 12.1, 0.3, "Total = Likes/Reactions + Comments + Shares", size=9.5, color=MUTED, italic=True)
 
     # --- Analysis + Reco slide ---
+    # The prose is written by hand per page in report_config.py. A brand the
+    # writer has not covered gets no slide rather than a frame of empty boxes.
+    a = ANALYSIS.get(key)
+    if not a:
+        continue
     s = add_slide(); set_bg(s, DARK)
     add_badge(s, 0.6, 0.5, 0.55, c, LETTER[key], fs=20)
     add_text(s, 1.32, 0.46, 9.5, 0.5, display, size=23, color=WHITE, bold=True, font=HEAD_FONT)
-    add_text(s, 1.32, 0.98, 10.5, 0.4, f"บทวิเคราะห์คอนเทนต์ & ข้อเสนอแนะเดือนถัดไป — วิเคราะห์จาก {v['posts']} โพสต์ในเดือน พ.ค.",
+    add_text(s, 1.32, 0.98, 10.5, 0.4, f"บทวิเคราะห์คอนเทนต์ & ข้อเสนอแนะเดือนถัดไป — วิเคราะห์จาก {v['posts']} โพสต์ในเดือน{M['th_full']}",
              size=12, color=hx('#9FC9DE'))
     # chips
-    a = ANALYSIS[key]; chx = 0.6
+    chx = 0.6
     for chip in a['chips']:
         w_est = 0.16 + len(chip) * 0.088
         add_rect(s, chx, 1.6, w_est, 0.42, fill=PANEL, radius=0.3, line_color=hx('#2A3A57'), line_w=1.0)

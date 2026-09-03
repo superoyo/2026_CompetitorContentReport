@@ -1,107 +1,32 @@
 # -*- coding: utf-8 -*-
-import json, base64, os
+"""Render the dashboard page.
+
+Two ways in, because a month has to be viewable long after the scraped files
+that produced it are gone:
+
+    (default)              build the payload from the freshly processed month
+    $DASHBOARD_FROM_DATA   render a payload saved by an earlier run
+
+Either way the payload is also written to $DASHBOARD_DATA_JSON so the server
+can store it — it carries its own images as data URIs and needs nothing else
+from disk.
+"""
+import json, os
 
 import month_util
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
-from report_config import BRANDS, ANALYSIS, PAGE_URL, CONTENT_SUMMARY, KEY_LEARNING
 
-P = json.load(open(os.environ.get('PROCESSED_JSON', '/tmp/processed_8.json')))
-AGG = P['agg']; MET = P['metrics']; TOP5 = P['top5']; DAILY = P['daily']; ALL = P.get('all', {})
+FROM_DATA = os.environ.get('DASHBOARD_FROM_DATA', '').strip()
+if FROM_DATA:
+    with open(FROM_DATA, encoding='utf-8') as f:
+        DATA = json.load(f)
+    M = month_util.info(DATA.get('month'))
+else:
+    import dashboard_data
+    DATA = dashboard_data.build()
+    M = month_util.info()
 
-NAME = {b[0]: b[1] for b in BRANDS}
-
-# daily series across May
-M = month_util.info()
-all_days = [f"{M['iso']}-{d:02d}" for d in range(1, M['days'] + 1)]
-daily_series = {k: [DAILY.get(k, {}).get(day, 0) for day in all_days] for k in AGG}
-
-def img_b64(path):
-    if path and os.path.exists(path):
-        with open(path, 'rb') as f:
-            return "data:image/jpeg;base64," + base64.b64encode(f.read()).decode()
-    return ""
-
-def post_image_path(post):
-    """Resolve a post's own image, preferring the cropped 4:5 version.
-
-    Keyed on the path process.py recorded for THIS post, never on its rank:
-    indexing by rank let a leftover file from an earlier month show up under
-    a post that has no image of its own.
-    """
-    src = post.get('image_path')
-    if not src:
-        return None
-    cropped = os.path.join(ROOT, 'post_images_cropped', os.path.basename(src))
-    if os.path.exists(cropped):
-        return cropped
-    return src if os.path.exists(src) else None
-
-top5_out = {}
-for key in AGG:
-    lst = TOP5[key][:5]
-    top5_out[key] = [{
-        'rank': i + 1,
-        'time': (p.get('time') or '')[:10],
-        'text': (p.get('text') or '').strip(),
-        'likes': p.get('likes') or 0, 'comments': p.get('comments') or 0,
-        'shares': p.get('shares') or 0, 'total': p.get('total') or 0,
-        'url': p.get('url') or PAGE_URL.get(key, ''),
-        'media_type': p.get('media_type'),
-        'img': img_b64(post_image_path(p)),
-    } for i, p in enumerate(lst)]
-
-# all posts (contact-sheet overview) — small thumbnails, minimal fields
-all_out = {}
-for key in AGG:
-    lst = ALL.get(key, [])
-    all_out[key] = [{
-        'time': (p.get('time') or '')[:10],
-        'text': (p.get('text') or '').strip(),
-        'total': p.get('total') or 0,
-        'likes': p.get('likes') or 0, 'comments': p.get('comments') or 0,
-        'shares': p.get('shares') or 0,
-        'media_type': p.get('media_type'),
-        'url': p.get('url') or PAGE_URL.get(key, ''),
-        'thumb': img_b64(p.get('thumb')),
-        'w': p.get('thumb_w'), 'h': p.get('thumb_h'),
-    } for p in lst]
-
-def logo_b64(key):
-    p = f"logos/{key}.jpg"
-    if os.path.exists(p):
-        with open(p, 'rb') as f:
-            return "data:image/jpeg;base64," + base64.b64encode(f.read()).decode()
-    return ""
-
-# metrics overview rows derived from the scrape (posts/likes/comments/shares/total/avg
-# + dominant format + best day-of-week). No fabricated fans/growth — everything here
-# comes straight from the scraped May posts. Rows sorted by total engagement desc.
-FMT_TH = {'video': '📹 วิดีโอ', 'photo': '🖼️ รูปภาพ', 'text': '📝 ข้อความ', 'other': '📄 อื่นๆ', None: '—'}
-mo_cols = ['posts', 'likes', 'comments', 'shares', 'total', 'avg']
-mo_max = {c: max(AGG[k][c] for k in AGG) for c in mo_cols}
-metrics_overview = []
-for k in sorted(AGG, key=lambda x: AGG[x]['total'], reverse=True):
-    a = AGG[k]; m = MET[k]
-    metrics_overview.append({
-        'key': k, 'name': NAME[k],
-        'color': next(b[3] for b in BRANDS if b[0] == k),
-        'logo': logo_b64(k),
-        'posts': a['posts'], 'likes': a['likes'], 'comments': a['comments'],
-        'shares': a['shares'], 'total': a['total'], 'avg': round(a['avg']),
-        'best_format': FMT_TH.get(m.get('best_format'), '—'),
-        'best_dow': m.get('best_dow') or '—',
-    })
-
-DATA = {
-    'brands': [{'key': b[0], 'name': b[1], 'letter': b[2], 'color': b[3]} for b in BRANDS],
-    'mo': metrics_overview, 'mo_max': mo_max,
-    'agg': AGG, 'days': all_days, 'daily': daily_series, 'top5': top5_out,
-    'all': all_out, 'metrics': MET, 'ai': ANALYSIS, 'summary': CONTENT_SUMMARY,
-    'keylearning': KEY_LEARNING,
-    'grand_total': sum(AGG[k]['total'] for k in AGG),
-    'total_posts': sum(AGG[k]['posts'] for k in AGG),
-}
 data_json = json.dumps(DATA, ensure_ascii=False)
 
 HTML = r'''<!DOCTYPE html>
@@ -307,8 +232,71 @@ HTML = r'''<!DOCTYPE html>
   .mp-m.sel{background:#1877F2;color:#fff}
   .mp-m:disabled{opacity:.3;cursor:not-allowed}
   .mp-note{font-size:10.5px;color:#7A8694;font-family:var(--head);margin-top:11px;line-height:1.45}
+  /* A month the picker can open is one we already fetched; the rest need a
+     reload first, so the grid says which is which before it is clicked. */
+  .mp-m.has{box-shadow:inset 0 0 0 1.5px #16A34A}
+  .mp-m.has.sel{box-shadow:inset 0 0 0 1.5px #0B7B3E}
+  .mp-legend{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:10px;font-family:var(--head);
+    font-size:10px;color:#7A8694}
+  .mp-legend span{display:flex;align-items:center;gap:5px}
+  .mp-key{width:11px;height:11px;border-radius:4px;display:inline-block;background:var(--panel2)}
+  .mp-key.has{box-shadow:inset 0 0 0 1.5px #16A34A}
+  .mp-key.none{box-shadow:inset 0 0 0 1.5px #D7DDE5}
   @media(max-width:640px){.head-right{justify-content:flex-start}.rf-msg{text-align:left;max-width:100%}
     .mp-pop{right:auto;left:0}}
+
+  /* ---- Product Group picker (top left) ---- */
+  .gp-wrap{position:relative;display:inline-block;margin-bottom:10px}
+  .gp-btn{font-family:var(--head);font-size:13px;font-weight:800;color:#1B2430;background:var(--panel);
+    border:1px solid var(--line);padding:8px 14px;border-radius:999px;cursor:pointer;display:flex;
+    align-items:center;gap:9px;box-shadow:var(--shadow);white-space:nowrap;transition:.15s;max-width:100%}
+  .gp-btn:hover{border-color:#1877F2;color:#1877F2}
+  .gp-btn:disabled{opacity:.55;cursor:progress}
+  .gp-dot{width:10px;height:10px;border-radius:50%;background:#C6CED8;flex:none}
+  .gp-caret{font-size:10px;color:#8A94A2}
+  .gp-pop{position:absolute;top:calc(100% + 8px);left:0;z-index:70;background:var(--panel);
+    border:1px solid var(--line);border-radius:14px;box-shadow:0 14px 36px rgba(16,24,40,.18);
+    padding:7px;min-width:270px;max-height:320px;overflow:auto;display:none;text-align:left}
+  .gp-pop.open{display:block}
+  .gp-item{display:flex;align-items:center;gap:9px;width:100%;padding:9px 11px;border:none;
+    background:none;border-radius:9px;cursor:pointer;font-family:var(--head);font-size:13px;
+    font-weight:700;color:#3B4654;text-align:left}
+  .gp-item:hover{background:#E7F0FE;color:#1877F2}
+  .gp-item.sel{background:#1877F2;color:#fff}
+  .gp-item .n{flex:1;overflow:hidden;text-overflow:ellipsis}
+  .gp-item .c{font-size:11px;font-weight:600;opacity:.75}
+  .gp-empty{padding:12px;font-family:var(--head);font-size:11.5px;color:#7A8694;line-height:1.5}
+
+  /* ---- Brand confirm dialog ---- */
+  .bd-back{position:fixed;inset:0;background:rgba(11,20,34,.5);z-index:200;display:none;
+    align-items:center;justify-content:center;padding:20px}
+  .bd-back.open{display:flex}
+  .bd-card{background:var(--panel);border-radius:18px;box-shadow:0 24px 60px rgba(16,24,40,.3);
+    width:min(560px,100%);max-height:min(78vh,720px);display:flex;flex-direction:column;overflow:hidden}
+  .bd-head{padding:18px 22px 12px}
+  .bd-head h3{margin:0;font-family:var(--head);font-size:18px;font-weight:800;color:#101A28}
+  .bd-head p{margin:6px 0 0;font-size:12px;color:#66707E;line-height:1.55}
+  .bd-tools{display:flex;gap:8px;padding:0 22px 12px}
+  .bd-tool{font-family:var(--head);font-size:11.5px;font-weight:700;color:#3B4654;background:var(--panel2);
+    border:1px solid var(--line);padding:6px 12px;border-radius:999px;cursor:pointer}
+  .bd-tool:hover{border-color:#1877F2;color:#1877F2}
+  .bd-list{overflow:auto;padding:0 12px;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+  .bd-row{display:flex;align-items:center;gap:11px;padding:10px 10px;border-radius:10px;cursor:pointer}
+  .bd-row:hover{background:var(--panel2)}
+  .bd-row input{width:16px;height:16px;accent-color:#1877F2;flex:none;cursor:pointer}
+  .bd-row .nm{font-family:var(--head);font-size:13px;font-weight:700;color:#26303C}
+  .bd-row .u{display:block;font-family:var(--head);font-size:10.5px;font-weight:500;color:#8A94A2;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:360px}
+  .bd-own{font-family:var(--head);font-size:9.5px;font-weight:800;color:#0B7B57;background:#E8F7F0;
+    border:1px solid #BEE9D8;padding:2px 7px;border-radius:999px}
+  .bd-foot{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 22px}
+  .bd-count{font-family:var(--head);font-size:11.5px;color:#66707E}
+  .bd-acts{display:flex;gap:9px}
+  .bd-go{font-family:var(--head);font-size:13px;font-weight:700;color:#fff;background:#1877F2;border:none;
+    padding:10px 20px;border-radius:999px;cursor:pointer}
+  .bd-go:disabled{opacity:.45;cursor:not-allowed}
+  .bd-cancel{font-family:var(--head);font-size:13px;font-weight:700;color:#5A6675;background:var(--panel2);
+    border:1px solid var(--line);padding:10px 18px;border-radius:999px;cursor:pointer}
   .pt-btn{font-family:var(--head);font-size:13px;font-weight:700;color:#0B7B57;background:#E8F7F0;
     border:1px solid #BEE9D8;padding:10px 16px;border-radius:999px;cursor:pointer;display:flex;
     align-items:center;gap:7px;box-shadow:var(--shadow);white-space:nowrap;transition:.15s;text-decoration:none}
@@ -335,8 +323,17 @@ HTML = r'''<!DOCTYPE html>
 <body>
   <div class="head">
     <div>
+      <div class="gp-wrap">
+        <button id="gpBtn" class="gp-btn" type="button" data-group="__GROUP_ID__"
+                aria-haspopup="listbox" aria-expanded="false">
+          <span class="gp-dot" id="gpDot"></span>
+          <span id="gpLbl">เลือก Product Group</span>
+          <span class="gp-caret">▾</span>
+        </button>
+        <div class="gp-pop" id="gpPop" role="listbox" aria-label="เลือก Product Group"></div>
+      </div>
       <h1>Facebook Engagement Dashboard</h1>
-      <div class="sub">สรุปยอด Engagement 8 เพจ — ประจำเดือน__M_TH__ __M_BE__ (__M_EN__)</div>
+      <div class="sub">สรุปยอด Engagement __M_PAGES__ เพจ — ประจำเดือน__M_TH__ __M_BE__ (__M_EN__)</div>
     </div>
     <div class="head-right">
       <div class="badge">1–__M_DAYS__ __M_ABBR__ __M_BE__</div>
@@ -354,7 +351,11 @@ HTML = r'''<!DOCTYPE html>
                 <button class="mp-nav" id="mpNext" type="button" aria-label="ปีถัดไป">&rsaquo;</button>
               </div>
               <div class="mp-grid" id="mpGrid"></div>
-              <div class="mp-note">เลือกเดือน แล้วกดปุ่มโหลดข้อมูลใหม่ · เดือนที่ยังไม่มาถึงจะกดไม่ได้</div>
+              <div class="mp-legend">
+                <span><i class="mp-key has"></i>มีข้อมูลแล้ว</span>
+                <span><i class="mp-key none"></i>ยังไม่มี — ต้องกดดึงข้อมูล</span>
+              </div>
+              <div class="mp-note" id="mpNote">เลือกเดือน แล้วกดปุ่มโหลดข้อมูลใหม่ · เดือนที่ยังไม่มาถึงจะกดไม่ได้</div>
             </div>
           </div>
           <a id="pptBtn" class="pt-btn" href="__PPT_FILE__" download>
@@ -365,6 +366,28 @@ HTML = r'''<!DOCTYPE html>
           </button>
         </div>
         <div class="rf-msg" id="rfMsg"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="bd-back" id="bdBack" role="dialog" aria-modal="true" aria-labelledby="bdTitle">
+    <div class="bd-card">
+      <div class="bd-head">
+        <h3 id="bdTitle">เลือกแบรนด์ที่จะประมวลผล</h3>
+        <p id="bdSub">ติ๊กแบรนด์ที่ต้องการให้อยู่ในรายงาน — รายชื่อมาจากหน้า Brand Asset
+          ของกลุ่มนี้ใน Agency Intelligence เฉพาะแบรนด์ที่มีลิงก์ Facebook</p>
+      </div>
+      <div class="bd-tools">
+        <button class="bd-tool" id="bdAll" type="button">เลือกทั้งหมด</button>
+        <button class="bd-tool" id="bdNone" type="button">ล้างทั้งหมด</button>
+      </div>
+      <div class="bd-list" id="bdList"></div>
+      <div class="bd-foot">
+        <span class="bd-count" id="bdCount">—</span>
+        <div class="bd-acts">
+          <button class="bd-cancel" id="bdCancel" type="button">ยกเลิก</button>
+          <button class="bd-go" id="bdGo" type="button">ยืนยัน</button>
+        </div>
       </div>
     </div>
   </div>
@@ -394,7 +417,7 @@ HTML = r'''<!DOCTYPE html>
 
   <div class="card allbox">
     <h2>ภาพรวมคอนเทนต์ทั้งหมด — __M_TH__ __M_BE__</h2>
-    <div class="hint">ทุกโพสต์ของทั้ง 8 เพจในเดือน __M_ABBR__ รวมในกรอบเดียว · แสดงภาพตามสัดส่วนจริงของแต่ละคอนเทนต์ (แนวตั้ง/แนวนอน/จัตุรัส) · เรียงตาม Engagement มาก→น้อยในแต่ละเพจ · มุมล่างขวาคือวันที่โพสต์ · คลิกที่ภาพเพื่อเปิดโพสต์จริง</div>
+    <div class="hint">ทุกโพสต์ของทั้ง __M_PAGES__ เพจในเดือน __M_ABBR__ รวมในกรอบเดียว · แสดงภาพตามสัดส่วนจริงของแต่ละคอนเทนต์ (แนวตั้ง/แนวนอน/จัตุรัส) · เรียงตาม Engagement มาก→น้อยในแต่ละเพจ · มุมล่างขวาคือวันที่โพสต์ · คลิกที่ภาพเพื่อเปิดโพสต์จริง</div>
     <div id="allGrid"></div>
   </div>
 
@@ -438,7 +461,9 @@ const thaiMonth = iso => { const p = String(iso||'').split('-');
 const short = k => DATA.brands.find(b=>b.key===k).name.replace(' Thailand','');
 const order = [...DATA.brands].sort((a,b)=>DATA.agg[b.key].total-DATA.agg[a.key].total);
 const maxTotal = Math.max(...DATA.brands.map(b=>DATA.agg[b.key].total));
-const topBrand = order[0];
+/* With no group picked there are no brands at all, so keep a stand-in rather
+   than letting every tile that reads a colour off it throw. */
+const topBrand = order[0] || {key:'', name:'—', color:'#8A94A2'};
 
 // Metrics Overview table — derived entirely from the scraped May posts
 const mo = DATA.mo, mmax = DATA.mo_max;
@@ -467,11 +492,17 @@ document.getElementById('moCard').innerHTML = `
     </tr>`).join('')}
     </tbody></table></div>`;
 
+/* Before a month is fetched every total is zero, so guard the two tiles that
+   would otherwise read NaN or name a "top" page out of an all-zero table. */
 const kpis = [
-  {label:'Engagement รวมทั้งหมด', val:fmt(DATA.grand_total), foot:DATA.total_posts+' โพสต์จาก 8 เพจ'},
-  {label:'เพจ Engagement สูงสุด', val:topBrand.name.replace(' Thailand',''), foot:fmt(DATA.agg[topBrand.key].total)+' engagement'},
+  {label:'Engagement รวมทั้งหมด', val:fmt(DATA.grand_total), foot:DATA.total_posts+' โพสต์จาก __M_PAGES__ เพจ'},
+  {label:'เพจ Engagement สูงสุด',
+   val: DATA.grand_total ? topBrand.name.replace(' Thailand','') : '—',
+   foot: DATA.grand_total ? fmt(DATA.agg[topBrand.key].total)+' engagement' : 'ยังไม่มีข้อมูลเดือนนี้'},
   {label:'โพสต์ทั้งหมด', val:fmt(DATA.total_posts), foot:'รวมทุกเพจในเดือน __M_ABBR__'},
-  {label:'Engagement เฉลี่ย/โพสต์', val:fmt(Math.round(DATA.grand_total/DATA.total_posts)), foot:'ค่าเฉลี่ยรวมทุกเพจ'},
+  {label:'Engagement เฉลี่ย/โพสต์',
+   val: DATA.total_posts ? fmt(Math.round(DATA.grand_total/DATA.total_posts)) : '—',
+   foot:'ค่าเฉลี่ยรวมทุกเพจ'},
 ];
 document.getElementById('kpis').innerHTML = kpis.map((k,i)=>`
   <div class="kpi">
@@ -528,26 +559,39 @@ tabsEl.innerHTML = order.map((b,i)=>`
 
 function renderAI(key){
   const b = DATA.brands.find(x=>x.key===key);
-  const a = DATA.ai[key]; const g = DATA.agg[key];
+  const g = DATA.agg[key];
+  /* The prose in report_config.py is written by hand for specific pages, so
+     any brand outside that set has none. Say so instead of rendering a card
+     of blanks — the numbers above it are real either way. */
+  const a = DATA.ai[key];
   aiEl.style.background = `linear-gradient(120deg,${b.color},#2563EB 55%,#06B6D4 90%)`;
+  const body = a ? `
+    <div class="ai-chips">${(a.chips||[]).map(c=>`<span class="ai-chip">${c}</span>`).join('')}</div>
+    <div class="ai-cols">
+      <div class="ai-col analysis">
+        <h4>📊 บทวิเคราะห์คอนเทนต์</h4>
+        <ul class="ai-list">${(a.analysis||[]).map(x=>`<li>${x}</li>`).join('')}</ul>
+      </div>
+      <div class="ai-col reco">
+        <h4>🚀 ควรทำต่อในเดือนถัดไป</h4>
+        <ul class="ai-list">${(a.reco||[]).map(x=>`<li>${x}</li>`).join('')}</ul>
+      </div>
+    </div>` : `
+    <div class="ai-cols">
+      <div class="ai-col analysis">
+        <h4>📊 ยังไม่มีบทวิเคราะห์ของแบรนด์นี้</h4>
+        <ul class="ai-list"><li>ตัวเลขและกราฟด้านบนมาจากการดึงข้อมูลจริง
+          ส่วนบทวิเคราะห์เป็นงานเขียนมือใน <code>report_config.py</code>
+          ซึ่งยังไม่มีของ ${b.name}</li></ul>
+      </div>
+    </div>`;
   aiEl.innerHTML = `<div class="ai-inner">
     <div class="ai-head">
       <div class="ai-logo" style="background:linear-gradient(135deg,${b.color},#06B6D4)">✨</div>
       <div class="t">บทวิเคราะห์ &amp; ข้อเสนอแนะ — ${b.name}
         <small>วิเคราะห์จากคอนเทนต์ทั้งหมด ${g.posts} โพสต์ในเดือน__M_TH__ &middot; Engagement รวม ${fmt(g.total)} &middot; เฉลี่ย ${fmt(g.avg)}/โพสต์</small>
       </div>
-    </div>
-    <div class="ai-chips">${a.chips.map(c=>`<span class="ai-chip">${c}</span>`).join('')}</div>
-    <div class="ai-cols">
-      <div class="ai-col analysis">
-        <h4>📊 บทวิเคราะห์คอนเทนต์</h4>
-        <ul class="ai-list">${a.analysis.map(x=>`<li>${x}</li>`).join('')}</ul>
-      </div>
-      <div class="ai-col reco">
-        <h4>🚀 ควรทำต่อในเดือนถัดไป</h4>
-        <ul class="ai-list">${a.reco.map(x=>`<li>${x}</li>`).join('')}</ul>
-      </div>
-    </div>
+    </div>${body}
   </div>`;
 }
 
@@ -632,7 +676,9 @@ function renderPosts(key){
   }).join('');
 }
 function selectPage(key){ renderAI(key); renderPosts(key); }
-selectPage(order[0].key);
+/* No group picked yet means no brands at all — the header and its pickers are
+   the whole page in that state, so there is nothing here to select. */
+if(order.length) selectPage(order[0].key);
 
 tabsEl.addEventListener('click',e=>{
   const t = e.target.closest('.tab'); if(!t) return;
@@ -641,6 +687,173 @@ tabsEl.addEventListener('click',e=>{
   t.style.background = DATA.brands.find(b=>b.key===t.dataset.key).color;
   selectPage(t.dataset.key);
 });
+</script>
+<script>
+/* Product Group picker + the brand confirmation that follows it.
+
+   The page is one group's report at a time. Which group, and which month, are
+   in the URL (?group=&month=) so that a link to a particular report keeps
+   working and a reload does not throw the choice away.
+
+   Picking a group does not immediately load anything: it asks which of that
+   group's brands belong in the report. The tick list is remembered per group
+   on the server, so this only feels like a question the first time. */
+window.FBDASH = {group:'', months:{}, brands:[], ready:false};
+(function(){
+  var btn=document.getElementById('gpBtn');
+  if(!btn) return;
+  var pop=document.getElementById('gpPop'), lbl=document.getElementById('gpLbl'),
+      dot=document.getElementById('gpDot'),
+      back=document.getElementById('bdBack'), list=document.getElementById('bdList'),
+      count=document.getElementById('bdCount'), go=document.getElementById('bdGo'),
+      sub=document.getElementById('bdSub'), title=document.getElementById('bdTitle');
+  var current=btn.getAttribute('data-group')||'', groups=[], pending='';
+
+  function qs(name){
+    var m=new RegExp('[?&]'+name+'=([^&]*)').exec(location.search);
+    return m?decodeURIComponent(m[1].replace(/\+/g,' ')):'';
+  }
+  function goTo(group, month){
+    var u='?group='+encodeURIComponent(group);
+    if(month) u+='&month='+encodeURIComponent(month);
+    location.href=u;
+  }
+  window.FBDASH.group=current;
+  window.FBDASH.goTo=goTo;
+
+  /* ---------- the dropdown ---------- */
+  function paint(){
+    if(!groups.length){
+      pop.innerHTML='<div class="gp-empty">ยังไม่มี Product Group ที่ใช้ได้ '
+        +'— เปิดใช้กลุ่มในหน้า Setting ของ Agency Intelligence ก่อน</div>';
+      return;
+    }
+    pop.innerHTML=groups.map(function(g){
+      return '<button class="gp-item'+(g.id===current?' sel':'')+'" type="button" role="option"'
+        +' data-id="'+g.id+'" aria-selected="'+(g.id===current)+'">'
+        +'<span class="gp-dot" style="background:'+(g.color||'#C6CED8')+'"></span>'
+        +'<span class="n">'+g.name+'</span>'
+        +'<span class="c">'+g.facebookBrands+' แบรนด์</span></button>';
+    }).join('');
+  }
+  function open(on){
+    pop.classList.toggle('open',on);
+    btn.setAttribute('aria-expanded',on?'true':'false');
+  }
+  btn.addEventListener('click',function(e){e.stopPropagation();open(!pop.classList.contains('open'));});
+  document.addEventListener('click',function(e){
+    if(pop.classList.contains('open') && !pop.contains(e.target) && !btn.contains(e.target)) open(false);
+  });
+  pop.addEventListener('click',function(e){
+    var t=e.target.closest?e.target.closest('.gp-item'):null;
+    if(!t) return;
+    open(false);
+    askBrands(t.getAttribute('data-id'));
+  });
+
+  /* ---------- the brand confirmation ---------- */
+  function rows(brands, selected){
+    var on={}; selected.forEach(function(k){on[k]=true;});
+    list.innerHTML=brands.map(function(b){
+      return '<label class="bd-row"><input type="checkbox" value="'+b.key+'"'
+        +(on[b.key]?' checked':'')+'>'
+        +'<span style="flex:1;min-width:0"><span class="nm">'+b.name+'</span>'
+        +'<span class="u">'+b.url+'</span></span>'
+        +(b.owned?'<span class="bd-own">แบรนด์เรา</span>':'')+'</label>';
+    }).join('');
+    tally();
+  }
+  function ticked(){
+    return Array.prototype.slice.call(list.querySelectorAll('input:checked'))
+      .map(function(i){return i.value;});
+  }
+  function tally(){
+    var n=ticked().length, all=list.querySelectorAll('input').length;
+    count.textContent='เลือกแล้ว '+n+' จาก '+all+' แบรนด์';
+    go.disabled=(n===0);
+  }
+  list.addEventListener('change',tally);
+  document.getElementById('bdAll').addEventListener('click',function(){
+    list.querySelectorAll('input').forEach(function(i){i.checked=true;}); tally();});
+  document.getElementById('bdNone').addEventListener('click',function(){
+    list.querySelectorAll('input').forEach(function(i){i.checked=false;}); tally();});
+  function shut(){back.classList.remove('open');}
+  document.getElementById('bdCancel').addEventListener('click',shut);
+  back.addEventListener('click',function(e){if(e.target===back) shut();});
+  document.addEventListener('keydown',function(e){if(e.key==='Escape') shut();});
+
+  function askBrands(id){
+    var g=groups.filter(function(x){return x.id===id;})[0];
+    pending=id;
+    title.textContent='เลือกแบรนด์ที่จะประมวลผล'+(g?' — '+g.name:'');
+    list.innerHTML='<div class="gp-empty">กำลังโหลดรายชื่อแบรนด์…</div>';
+    count.textContent='—'; go.disabled=true;
+    back.classList.add('open');
+    fetch('api/groups/'+encodeURIComponent(id)+'/brands',{cache:'no-store'})
+      .then(function(r){return r.json().then(function(j){if(!r.ok) throw new Error(j.error||('HTTP '+r.status)); return j;});})
+      .then(function(j){
+        if(!j.brands.length){
+          list.innerHTML='<div class="gp-empty">กลุ่มนี้ยังไม่มีแบรนด์ที่มีลิงก์ Facebook '
+            +'— เพิ่มลิงก์ในหน้า Brand Asset ของ Agency Intelligence ก่อน</div>';
+          count.textContent='0 แบรนด์'; return;
+        }
+        sub.textContent=j.first_time
+          ? 'เปิดกลุ่มนี้ครั้งแรก — ติ๊กไว้ทั้งหมดให้ก่อน เอาออกได้ตามต้องการ'
+          : 'ค่าที่เลือกไว้ครั้งก่อนถูกจำไว้แล้ว';
+        rows(j.brands, j.selected);
+      })
+      ['catch'](function(err){
+        list.innerHTML='<div class="gp-empty">โหลดรายชื่อแบรนด์ไม่ได้ — '+err.message+'</div>';
+      });
+  }
+
+  go.addEventListener('click',function(){
+    var keys=ticked();
+    if(!keys.length) return;
+    go.disabled=true; go.textContent='กำลังบันทึก…';
+    fetch('api/groups/'+encodeURIComponent(pending)+'/brands',{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({brands:keys})
+    }).then(function(r){
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      /* Land on the month the picker is already showing, so confirming the
+         brand list does not silently move the report to another month. */
+      goTo(pending, (document.getElementById('mpBtn')||{}).getAttribute
+        ? document.getElementById('mpBtn').getAttribute('data-sel') : '');
+    })['catch'](function(err){
+      go.disabled=false; go.textContent='ยืนยัน';
+      count.textContent='บันทึกไม่สำเร็จ — '+err.message;
+    });
+  });
+
+  /* ---------- which months this group already has ---------- */
+  function loadMonths(){
+    if(!current) return;
+    fetch('api/groups/'+encodeURIComponent(current)+'/months',{cache:'no-store'})
+      .then(function(r){return r.ok?r.json():{months:[]};})
+      .then(function(j){
+        (j.months||[]).forEach(function(m){window.FBDASH.months[m.month]=m;});
+        window.FBDASH.durable=j.durable!==false;
+        window.FBDASH.ready=true;
+        document.dispatchEvent(new CustomEvent('fbdash:months'));
+      })['catch'](function(){});
+  }
+
+  btn.disabled=true;
+  fetch('api/groups',{cache:'no-store'})
+    .then(function(r){return r.json().then(function(j){if(!r.ok) throw new Error(j.error||('HTTP '+r.status)); return j;});})
+    .then(function(j){
+      groups=j.groups||[]; btn.disabled=false;
+      var mine=groups.filter(function(g){return g.id===current;})[0];
+      if(mine){lbl.textContent=mine.name; dot.style.background=mine.color||'#C6CED8';}
+      else if(current){lbl.textContent=current;}
+      paint(); loadMonths();
+    })['catch'](function(err){
+      btn.disabled=false;
+      lbl.textContent=current||'เลือก Product Group';
+      pop.innerHTML='<div class="gp-empty">ดึงรายชื่อกลุ่มไม่ได้ — '+err.message+'</div>';
+    });
+})();
 </script>
 <script>
 /* Month picker + refresh button.
@@ -671,6 +884,9 @@ tabsEl.addEventListener('click',e=>{
   function isoSel(){return sel.y+'-'+pad(sel.m);}
   function drawLabel(){mpLbl.textContent=TH[sel.m-1]+' '+(sel.y+543);}
 
+  function iso(y,m){return y+'-'+pad(m);}
+  function have(isoM){return !!(window.FBDASH&&window.FBDASH.months[isoM]);}
+
   function drawGrid(){
     mpYr.textContent=viewY+' / พ.ศ. '+(viewY+543);
     mpPrev.disabled=viewY<=minY;
@@ -679,13 +895,16 @@ tabsEl.addEventListener('click',e=>{
     for(var i=1;i<=12;i++){
       var b=document.createElement('button');
       b.type='button';
-      b.className='mp-m'+(viewY===sel.y&&i===sel.m?' sel':'');
+      /* Outlined = already fetched. Both kinds stay clickable: one shows the
+         report, the other says it has to be fetched first. */
+      b.className='mp-m'+(viewY===sel.y&&i===sel.m?' sel':'')+(have(iso(viewY,i))?' has':'');
       b.textContent=TH[i-1];
       b.setAttribute('data-m',String(i));
       b.disabled=(viewY>maxY)||(viewY===maxY&&i>maxM);
       mpGrid.appendChild(b);
     }
   }
+  document.addEventListener('fbdash:months',function(){drawGrid();stateNote();});
   function openPop(on){
     mpPop.classList.toggle('open',on);
     mpBtn.setAttribute('aria-expanded',on?'true':'false');
@@ -695,14 +914,39 @@ tabsEl.addEventListener('click',e=>{
   mpBtn.addEventListener('click',function(e){e.stopPropagation();openPop(!mpPop.classList.contains('open'));});
   mpPrev.addEventListener('click',function(){if(viewY>minY){viewY--;drawGrid();}});
   mpNext.addEventListener('click',function(){if(viewY<maxY){viewY++;drawGrid();}});
+  /* What the note under the grid says about the month now selected. */
+  function stateNote(){
+    var note=document.getElementById('mpNote');
+    if(!note) return;
+    if(!window.FBDASH||!window.FBDASH.group){
+      note.textContent='เลือก Product Group ก่อน แล้วจึงเลือกเดือน';
+      return;
+    }
+    var m=window.FBDASH.months[isoSel()];
+    note.textContent = m
+      ? 'มีข้อมูลเดือนนี้แล้ว (' + m.brands + ' แบรนด์ · อัปเดต ' + (m.updated_at||'').slice(0,10)
+        + ') — กดเลือกเพื่อแสดง'
+      : 'ยังไม่มีข้อมูลเดือนนี้ — ต้องกดปุ่มโหลดข้อมูลใหม่ก่อน';
+  }
+
   mpGrid.addEventListener('click',function(e){
     var t=e.target;
     if(!t||t.className.indexOf('mp-m')<0||t.disabled) return;
     sel={y:viewY,m:+t.getAttribute('data-m')};
-    drawLabel();drawGrid();openPop(false);publish();
-    if(isoSel()!==(mpBtn.getAttribute('data-month')||''))
-      say('เลือก '+TH[sel.m-1]+' '+(sel.y+543)+' — กดโหลดข้อมูลใหม่เพื่อดึงเดือนนี้');
-    else say('');
+    drawLabel();drawGrid();publish();stateNote();
+    var group=(window.FBDASH||{}).group||'';
+    if(group && have(isoSel())){
+      /* Already fetched — show it. The server renders that month from what it
+         stored, so this costs nothing and needs no Apify call. */
+      openPop(false);
+      say('กำลังเปิดข้อมูลเดือน '+thai(isoSel())+'…');
+      window.FBDASH.goTo(group, isoSel());
+      return;
+    }
+    openPop(false);
+    say(group
+      ? 'ยังไม่มีข้อมูลเดือน '+thai(isoSel())+' — กดโหลดข้อมูลใหม่เพื่อดึงเดือนนี้'
+      : 'เลือก Product Group ก่อนจึงจะโหลดข้อมูลได้');
   });
   document.addEventListener('click',function(e){
     if(mpPop.classList.contains('open') && !mpPop.contains(e.target) && e.target!==mpBtn) openPop(false);
@@ -719,7 +963,13 @@ tabsEl.addEventListener('click',e=>{
     mpBtn.setAttribute('data-sel', isoSel());
     document.dispatchEvent(new CustomEvent('fbdash:month',{detail:isoSel()}));
   }
-  drawLabel();drawGrid();say(builtNote());publish();
+  /* Open on the month the page is actually showing, not on "last completed" —
+     the URL says which report this is, and the picker should agree with it. */
+  (function(){
+    var shown=(mpBtn.getAttribute('data-month')||'').split('-');
+    if(shown.length===2){sel={y:+shown[0],m:+shown[1]};viewY=sel.y;}
+  })();
+  drawLabel();drawGrid();say(builtNote());publish();stateNote();
 
   /* ---------- refresh ---------- */
   function lbl(t){btn.querySelector('.rf-lbl').textContent=t;}
@@ -743,7 +993,14 @@ tabsEl.addEventListener('click',e=>{
         if(!s.running){
           clearInterval(timer);
           if(s.error){busy(false);lbl('โหลดข้อมูลใหม่');say('ผิดพลาด: '+s.error);}
-          else{lbl('เสร็จแล้ว กำลังรีเฟรช…');say('');setTimeout(function(){location.reload();},800);}
+          else{
+            lbl('เสร็จแล้ว กำลังรีเฟรช…');say('');
+            /* Land on the month that was just fetched, which is not always the
+               month the page was showing when the run started. */
+            setTimeout(function(){
+              if(s.group) window.FBDASH.goTo(s.group, s.month); else location.reload();
+            },800);
+          }
         }
       })['catch'](function(){
         clearInterval(timer);busy(false);lbl('โหลดข้อมูลใหม่');say('ขาดการเชื่อมต่อเซิร์ฟเวอร์');
@@ -764,6 +1021,16 @@ tabsEl.addEventListener('click',e=>{
   });
 
   btn.addEventListener('click',function(){
+    var group=(window.FBDASH||{}).group||'';
+    if(!group){
+      say('เลือก Product Group ก่อน แล้วยืนยันรายชื่อแบรนด์ จึงจะโหลดข้อมูลได้');
+      return;
+    }
+    /* Re-fetching a month we already hold spends Apify credit and replaces
+       what is stored, so it is asked about rather than just done. */
+    if(have(isoSel()) && !confirm('เดือน '+thai(isoSel())+' มีข้อมูลอยู่แล้ว\n\n'
+        +'ต้องการดึงข้อมูลใหม่หรือไม่? ข้อมูลเดิมของเดือนนี้จะถูกแทนที่ '
+        +'และมีค่าใช้จ่าย Apify ตามจำนวนโพสต์')) return;
     var k=sessionStorage.getItem(SK);
     if(!k){
       k=prompt('ใส่ Refresh key (ค่าเดียวกับตัวแปร REFRESH_KEY บนเซิร์ฟเวอร์)');
@@ -774,7 +1041,7 @@ tabsEl.addEventListener('click',e=>{
     fetch('api/refresh',{
       method:'POST',
       headers:{'X-Refresh-Key':k,'Content-Type':'application/json'},
-      body:JSON.stringify({month:isoSel()})
+      body:JSON.stringify({month:isoSel(),group:group})
     }).then(function(r){
       if(r.status===409){track();return;}
       if(r.status===401){sessionStorage.removeItem(SK);busy(false);lbl('โหลดข้อมูลใหม่');say('Refresh key ไม่ถูกต้อง ลองอีกครั้ง');return;}
@@ -821,7 +1088,10 @@ tabsEl.addEventListener('click',e=>{
       var iso=target, was=lbl.textContent;
       lbl.textContent='กำลังสร้าง PPT '+thaiMonth(iso)+'…';
       note('');
-      fetch('api/pptx?month='+encodeURIComponent(iso)).then(function(r){
+      /* Send the group too: the server refuses rather than hand back a deck
+         built from another group's brands under this month's filename. */
+      fetch('api/pptx?month='+encodeURIComponent(iso)
+            +'&group='+encodeURIComponent((window.FBDASH||{}).group||'')).then(function(r){
         if(!r.ok){
           return r.json()['catch'](function(){return {};}).then(function(j){
             throw new Error(j.error||('HTTP '+r.status));
@@ -930,10 +1200,20 @@ html = HTML.replace('__DATA__', data_json)
 for token, value in (('__M_TH__', M['th_full']), ('__M_ABBR__', M['th_abbr']),
                      ('__M_BE__', str(M['be_year'])), ('__M_EN__', M['en_label']),
                      ('__M_DAYS__', str(M['days'])), ('__M_ISO__', M['iso']),
+                     ('__M_PAGES__', str(len(DATA.get('brands') or []))),
+                     ('__GROUP_ID__', DATA.get('group_id') or ''),
                      ('__PPT_FILE__', '%s_%d_Engagement_Top5.pptx' % (M['en_full'], M['year']))):
     html = html.replace(token, value)
 # index.html is the site homepage served by GitHub / Railway
-out = os.path.join(ROOT, "index.html")
+out = os.environ.get('DASHBOARD_HTML') or os.path.join(ROOT, "index.html")
 with open(out, 'w', encoding='utf-8') as f:
     f.write(html)
 print("saved", out, round(len(html)/1024), "KB")
+
+# Hand the payload to whoever is storing this month. Skipped when we were
+# rendering a stored payload in the first place — nothing new to record.
+keep = os.environ.get('DASHBOARD_DATA_JSON', '').strip()
+if keep and not FROM_DATA:
+    with open(keep, 'w', encoding='utf-8') as f:
+        f.write(data_json)
+    print("saved", keep, round(len(data_json)/1024), "KB")

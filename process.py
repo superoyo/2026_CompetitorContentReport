@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
-"""Process scraped data: filter May 2026, aggregate, top5, media metrics, download images."""
-import json, os, urllib.request, ssl
+"""Process scraped data: filter to the report month, aggregate, top5, media metrics, download images."""
+import json, os, urllib.parse, urllib.request, ssl
 
+import brandset
 import month_util
 from collections import defaultdict, Counter
 
@@ -9,32 +10,45 @@ RAW = json.load(open('/tmp/fb_raw_8.json'))
 M = month_util.info()
 print("MONTH", M["iso"], M["en_label"], flush=True)
 
-# canonical page keys we care about (in requested order)
-PAGES = ["FinelineThailand", "HygieneThailand", "DownyThailand", "PaoSociety",
-         "OMOThailand", "ComfortZoneThailand", "BreezeThailand", "ATTACKFamily"]
+BRANDS = brandset.load()
+# canonical page keys we care about, in the order the brand set gives them
+PAGES = [b["key"] for b in BRANDS]
 
 DOW_TH = ["จันทร์", "อังคาร", "พุธ", "พฤหัส", "ศุกร์", "เสาร์", "อาทิตย์"]
 
+
+def _slug(url):
+    """The vanity part of a page URL: .../PaoSociety/ -> paosociety."""
+    try:
+        path = urllib.parse.urlparse(url).path.strip('/')
+        return (path.split('/')[0] or '').lower()
+    except Exception:
+        return ''
+
+
+# Longest alias first so a page whose slug contains another's (say "omo" inside
+# "omothailand") cannot be claimed by the shorter one.
+ALIASES = sorted(
+    ((b["key"], {a for a in (b["key"].lower(), _slug(b["url"])) if a}) for b in BRANDS),
+    key=lambda kv: -max(len(a) for a in kv[1]),
+)
+
+
+def fname(key):
+    """A key is safe to print but comes from a page URL, so not to write to disk."""
+    return ''.join(c if (c.isalnum() or c in '-_') else '_' for c in key)[:60] or 'brand'
+
+
 def norm_page(item):
-    """Map scraped item to one of our canonical keys via url/pageName."""
+    """Map a scraped item to one of our canonical keys via url/pageName."""
     pn = (item.get('pageName') or '')
     url = (item.get('url') or '') + ' ' + (item.get('inputUrl') or '') + ' ' + (item.get('facebookUrl') or '')
     low = (pn + ' ' + url).lower()
-    aliases = {
-        "FinelineThailand": ["finelinethailand", "fineline"],
-        "HygieneThailand": ["hygienethailand", "hygiene"],
-        "DownyThailand": ["downythailand", "downy"],
-        "PaoSociety": ["paosociety", "pao"],
-        "OMOThailand": ["omothailand", "omo"],
-        "ComfortZoneThailand": ["comfortzonethailand", "comfortzone", "comfort"],
-        "BreezeThailand": ["breezethailand", "breeze"],
-        "ATTACKFamily": ["attackfamily", "attack"],
-    }
-    # prefer exact pageName match
+    # prefer an exact pageName match
     for k in PAGES:
         if pn == k:
             return k
-    for k, al in aliases.items():
+    for k, al in ALIASES:
         for a in al:
             if a in low:
                 return k
@@ -66,8 +80,8 @@ def best_image_url(item):
             return x['thumbnail']
     return None
 
-# filter May 2026
-def in_may(item):
+# keep only posts inside the report month (the scrape window is wider)
+def in_month(item):
     t = (item.get('time') or '')[:10]
     return t.startswith(M['iso'])
 
@@ -78,13 +92,13 @@ for it in RAW:
     if not k:
         skipped += 1
         continue
-    if not in_may(it):
+    if not in_month(it):
         continue
     buckets[k].append(it)
 
 print("skipped(no page match):", skipped)
 for k in PAGES:
-    print(f"  {k}: {len(buckets.get(k, []))} May posts")
+    print(f"  {k}: {len(buckets.get(k, []))} posts in {M['iso']}")
 
 # aggregates
 agg = {}
@@ -162,7 +176,7 @@ UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML,
 for k in PAGES:
     for i, p in enumerate(top5[k], 1):
         url = p.get('image_url')
-        path = f"post_images/{k}_{i}.jpg"
+        path = f"post_images/{fname(k)}_{i}.jpg"
         p['image_path'] = None
         if not url:
             continue
@@ -202,7 +216,7 @@ for k in PAGES:
         p['thumb'] = None
         p['thumb_w'] = p['thumb_h'] = None
         url = p.get('image_url')
-        path = f"post_images_all/{k}_{i}.jpg"
+        path = f"post_images_all/{fname(k)}_{i}.jpg"
         if not url:
             continue
         try:
@@ -217,8 +231,9 @@ for k in PAGES:
             print("FAIL thumb", path, str(e)[:60])
     print(f"thumbs {k}: {ok}/{len(allposts[k])}")
 
-# Stamp the month so a later step cannot build a deck from another month's data.
-json.dump({'month': M['iso'],
+# Stamp the month and the brand set so a later step cannot build a deck from
+# another month's data, or label one group's numbers with another group's name.
+json.dump({'month': M['iso'], 'group_id': brandset.group_id(), 'brands': BRANDS,
            'agg': agg, 'metrics': metrics, 'top5': top5, 'all': allposts,
            'daily': {k: dict(daily[k]) for k in PAGES}},
           open('/tmp/processed_8.json', 'w'), ensure_ascii=False, indent=1)
