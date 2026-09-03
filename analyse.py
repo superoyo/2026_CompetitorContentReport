@@ -19,10 +19,14 @@ records no analysis and the dashboard leaves those boxes out — the numbers,
 charts and Top 5 are unaffected.
 
 Environment:
-    ANTHROPIC_API_KEY   also accepts ANTHOPIC_KEY, the spelling already set on
-                        Railway for Agency Intelligence's AI Suggest button
-    ANALYSIS_MODEL      default claude-opus-5
-    ANALYSIS_EFFORT     low | medium | high | xhigh | max (default high)
+    ANTHROPIC_API_KEY      also accepts ANTHOPIC_KEY, the spelling already set
+                           on Railway for Agency Intelligence's AI Suggest
+    ANTHROPIC_WORKSPACE_ID only needed when the credential is a workspace-scoped
+                           identity token rather than a plain sk-ant-api key —
+                           without it that kind of credential is refused with
+                           "anthropic-workspace-id is required"
+    ANALYSIS_MODEL         default claude-opus-5
+    ANALYSIS_EFFORT        low | medium | high | xhigh | max (default high)
 """
 import json
 import os
@@ -32,6 +36,18 @@ PROCESSED = os.environ.get("PROCESSED_JSON", "/tmp/processed_8.json")
 MODEL = os.environ.get("ANALYSIS_MODEL", "claude-opus-5").strip()
 EFFORT = os.environ.get("ANALYSIS_EFFORT", "high").strip()
 KEY = (os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHOPIC_KEY") or "").strip()
+WORKSPACE = os.environ.get("ANTHROPIC_WORKSPACE_ID", "").strip()
+
+
+def client():
+    """The SDK client, with the workspace header when one is configured.
+
+    The SDK reads the key from the environment but not the workspace id, and a
+    workspace-scoped credential without that header is rejected outright.
+    """
+    import anthropic
+    headers = {"anthropic-workspace-id": WORKSPACE} if WORKSPACE else None
+    return anthropic.Anthropic(api_key=KEY, default_headers=headers)
 
 # $ per million tokens, for the line printed at the end of the run.
 PRICES = {
@@ -159,18 +175,25 @@ def ping():
     if not KEY:
         return False, "ยังไม่ได้ตั้ง ANTHROPIC_API_KEY"
     try:
-        import anthropic
+        import anthropic  # noqa: F401
     except ImportError:
         return False, "เซิร์ฟเวอร์ยังไม่ได้ติดตั้งไลบรารี anthropic"
     try:
-        r = anthropic.Anthropic(api_key=KEY).messages.create(
+        r = client().messages.create(
             model=MODEL, max_tokens=16,
             messages=[{"role": "user", "content": "ตอบว่า ok"}],
         )
         used = r.usage.input_tokens + r.usage.output_tokens
-        return True, "%s ตอบกลับแล้ว (ใช้ %d token)" % (MODEL, used)
+        return True, "%s ตอบกลับแล้ว (ใช้ %d token)%s" % (
+            MODEL, used, " · workspace %s" % WORKSPACE if WORKSPACE else "")
     except Exception as exc:
-        return False, "%s: %s" % (MODEL, str(exc)[:160])
+        msg = str(exc)
+        if "anthropic-workspace-id" in msg:
+            # Say what to do, not just what the API said.
+            return False, ("คีย์นี้เป็น identity token ที่ผูกกับ workspace — "
+                           "ตั้ง ANTHROPIC_WORKSPACE_ID เพิ่ม หรือเปลี่ยนไปใช้ "
+                           "API key ธรรมดา (ขึ้นต้น sk-ant-api) จาก console.anthropic.com")
+        return False, "%s: %s" % (MODEL, msg[:400])
 
 
 def main():
@@ -187,16 +210,13 @@ def main():
               "(ตัวเลขและกราฟไม่กระทบ)", flush=True)
         return save(P, None)
 
-    import anthropic
-
     import month_util
     M = month_util.info(P.get("month"))
     label = "%s %d" % (M["th_full"], M["be_year"])
 
-    client = anthropic.Anthropic(api_key=KEY)
     print("เขียนบทวิเคราะห์ด้วย %s (effort=%s) · %d เพจ" % (MODEL, EFFORT, len(brands)), flush=True)
     try:
-        resp = client.messages.create(
+        resp = client().messages.create(
             model=MODEL,
             max_tokens=16000,
             system=SYSTEM,

@@ -157,6 +157,7 @@ curl -s -H "X-Refresh-Key: <REFRESH_KEY ของคุณ>" \
 | ตัวแปร | ค่า |
 |---|---|
 | `ANTHROPIC_API_KEY` | รับ `ANTHOPIC_KEY` ด้วย (ชื่อที่ตั้งไว้แล้วบน Railway ฝั่ง Agency Intelligence) |
+| `ANTHROPIC_WORKSPACE_ID` | ตั้งเฉพาะเมื่อคีย์เป็น identity token ที่ผูก workspace — API key ธรรมดา (`sk-ant-api…`) ไม่ต้องตั้ง |
 | `ANALYSIS_MODEL` | ค่าเริ่มต้น `claude-opus-5` |
 | `ANALYSIS_EFFORT` | `low` … `max` (ค่าเริ่มต้น `high`) |
 
