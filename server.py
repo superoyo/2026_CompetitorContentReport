@@ -389,7 +389,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if route.endswith("/months") and "/api/groups/" in route:
             group = urllib.parse.unquote(route.split("/api/groups/")[1].rsplit("/months", 1)[0])
             self._json(200, {"months": store.months(group),
-                             "durable": store.available()})
+                             "durable": store.available(),
+                             "storage_note": store.why_unavailable()})
             return
 
         if route.endswith("/api/pptx"):
@@ -410,6 +411,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     "configured": bool(APIFY_TOKEN),
                     "agency": agency_api.configured(),
                     "durable": store.available(),
+                    "storage_note": store.why_unavailable(),
                     "current_month": month_util.info()["iso"],
                     "has_processed": os.path.exists(PROCESSED),
                     "log": JOB["log"][-20:],

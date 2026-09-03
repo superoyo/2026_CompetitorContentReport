@@ -834,6 +834,13 @@ window.FBDASH = {group:'', months:{}, brands:[], ready:false};
       .then(function(j){
         (j.months||[]).forEach(function(m){window.FBDASH.months[m.month]=m;});
         window.FBDASH.durable=j.durable!==false;
+        /* Saving to /tmp still works but is lost at the next deploy. Say it
+           here rather than letting someone fetch a month and find it gone. */
+        if(j.durable===false){
+          var m=document.getElementById('rfMsg');
+          if(m) m.textContent='⚠️ ยังไม่ได้เก็บถาวร ('+(j.storage_note||'ไม่มีฐานข้อมูล')
+            +') — เดือนที่ดึงจะหายเมื่อ deploy ใหม่';
+        }
         window.FBDASH.ready=true;
         document.dispatchEvent(new CustomEvent('fbdash:months'));
       })['catch'](function(){});
