@@ -143,6 +143,16 @@ for k in PAGES:
     top5[k] = ranked[:5]
     allposts[k] = ranked
 
+# Clear last run's images first. Files are named by page + rank, so a leftover
+# file would otherwise be picked up by a post that has no image of its own.
+import glob, shutil
+for d in ('post_images', 'post_images_cropped', 'post_images_all'):
+    n = 0
+    for f in glob.glob(os.path.join(d, '*.jpg')):
+        os.remove(f); n += 1
+    if n:
+        print("cleared", n, "stale files from", d, flush=True)
+
 # download images for top5
 os.makedirs('post_images', exist_ok=True)
 ctx = ssl.create_default_context()

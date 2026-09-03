@@ -22,9 +22,20 @@ def img_b64(path):
             return "data:image/jpeg;base64," + base64.b64encode(f.read()).decode()
     return ""
 
-def cropped_path(key, i):
-    p = f"post_images_cropped/{key}_{i}.jpg"
-    return os.path.abspath(p) if os.path.exists(p) else None
+def post_image_path(post):
+    """Resolve a post's own image, preferring the cropped 4:5 version.
+
+    Keyed on the path process.py recorded for THIS post, never on its rank:
+    indexing by rank let a leftover file from an earlier month show up under
+    a post that has no image of its own.
+    """
+    src = post.get('image_path')
+    if not src:
+        return None
+    cropped = os.path.join(ROOT, 'post_images_cropped', os.path.basename(src))
+    if os.path.exists(cropped):
+        return cropped
+    return src if os.path.exists(src) else None
 
 top5_out = {}
 for key in AGG:
@@ -37,7 +48,7 @@ for key in AGG:
         'shares': p.get('shares') or 0, 'total': p.get('total') or 0,
         'url': p.get('url') or PAGE_URL.get(key, ''),
         'media_type': p.get('media_type'),
-        'img': img_b64(cropped_path(key, i + 1)),
+        'img': img_b64(post_image_path(p)),
     } for i, p in enumerate(lst)]
 
 # all posts (contact-sheet overview) — small thumbnails, minimal fields
@@ -176,6 +187,9 @@ HTML = r'''<!DOCTYPE html>
   .post .noimg{width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;font-weight:700}
   .post .noimg .q{font-size:46px;line-height:.7;font-family:var(--head)}
   .post .noimg .l{font-size:12px;color:var(--muted)}
+  .post .noimg .tx{font-size:12.5px;line-height:1.62;color:#42505F;font-weight:600;text-align:left;
+    padding:0 20px;max-height:66%;overflow:hidden;display:-webkit-box;-webkit-line-clamp:8;
+    -webkit-box-orient:vertical;white-space:pre-wrap;word-break:break-word}
   .post .rk{position:absolute;top:10px;left:10px;width:30px;height:30px;border-radius:50%;display:grid;place-items:center;font-weight:800;font-size:14px;color:#fff;box-shadow:0 2px 8px rgba(0,0,0,.25);font-family:var(--head)}
   .post .mt{position:absolute;top:11px;right:10px;background:rgba(255,255,255,.92);color:#3A4658;font-size:10px;font-weight:700;padding:3px 9px;border-radius:999px;backdrop-filter:blur(4px);box-shadow:0 1px 4px rgba(0,0,0,.12)}
   .post .body{padding:12px 13px 14px;display:flex;flex-direction:column;gap:9px;flex:1}
@@ -198,7 +212,12 @@ HTML = r'''<!DOCTYPE html>
   .ag-t img{height:96px;width:auto;display:block;transition:.16s}
   .ag-t:hover{border-color:#C6CFDB}
   .ag-t:hover img{transform:scale(1.06)}
-  .ag-t .noimg{width:96px;height:96px;display:grid;place-items:center;font-size:22px;font-family:var(--head)}
+  .ag-t .noimg{width:152px;height:96px;display:block;padding:8px 9px 17px;font-family:var(--head);
+    font-size:9.5px;line-height:1.42;overflow:hidden}
+  .ag-t .noimg .qm{font-size:14px;font-weight:800;line-height:1;opacity:.45;margin-bottom:2px}
+  .ag-t .noimg .tx{display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;
+    color:#42505F;font-weight:600;white-space:pre-wrap;word-break:break-word}
+  .ag-t .noimg .tx:empty::after{content:'โพสต์ข้อความ';color:#9AA5B1;font-weight:600}
   .ag-t .ag-badge{position:absolute;left:0;right:0;bottom:0;padding:14px 5px 3px;text-align:right;
     background:linear-gradient(transparent,rgba(10,16,26,.82));color:#fff;font-size:10px;font-weight:800;font-family:var(--head);letter-spacing:.2px}
   .ag-t .ag-mt{position:absolute;top:4px;left:4px;font-size:10px;line-height:1;filter:drop-shadow(0 1px 2px rgba(0,0,0,.5))}
@@ -409,6 +428,9 @@ HTML = r'''<!DOCTYPE html>
 <script>
 const DATA = __DATA__;
 const fmt = n => n.toLocaleString('en-US');
+/* Captions are Facebook text: escape before putting them in markup. */
+const esc = t => String(t||'').replace(/&/g,'&amp;').replace(/</g,'&lt;')
+                              .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 const short = k => DATA.brands.find(b=>b.key===k).name.replace(' Thailand','');
 const order = [...DATA.brands].sort((a,b)=>DATA.agg[b.key].total-DATA.agg[a.key].total);
 const maxTotal = Math.max(...DATA.brands.map(b=>DATA.agg[b.key].total));
@@ -536,7 +558,9 @@ document.getElementById('allGrid').innerHTML = order.map(b=>{
     const cap = `${fmt(p.total)} engagement · ${p.time}\n${(p.text||'').slice(0,140)}`;
     const inner = p.thumb
       ? `<img src="${p.thumb}"${p.w?` width="${p.w}" height="${p.h}"`:''} alt="" loading="lazy">`
-      : `<div class="noimg" style="background:linear-gradient(150deg,${b.color}30,${b.color}10);color:${b.color}">&ldquo;</div>`;
+      : `<div class="noimg" style="background:linear-gradient(150deg,${b.color}30,${b.color}10)">
+           <div class="qm" style="color:${b.color}">&ldquo;</div>
+           <div class="tx">${esc((p.text||'').trim())}</div></div>`;
     return `<a class="ag-t" ${link} title="${cap.replace(/"/g,'&quot;')}">
       ${inner}
       <span class="ag-mt">${MTI[p.media_type]||''}</span>
@@ -586,7 +610,7 @@ function renderPosts(key){
     const link = p.url ? `href="${p.url}" target="_blank"` : '';
     return `<a class="post" ${link}>
       <div class="imgbox">
-        ${p.img?`<img src="${p.img}" alt="">`:`<div class="noimg" style="background:linear-gradient(150deg,${color}2e,${color}10)"><div class="q" style="color:${color}">&ldquo;</div><div class="l">โพสต์ข้อความ</div></div>`}
+        ${p.img?`<img src="${p.img}" alt="">`:`<div class="noimg" style="background:linear-gradient(150deg,${color}2e,${color}10)"><div class="q" style="color:${color}">&ldquo;</div>${(p.text||'').trim()?`<div class="tx">${esc(p.text)}</div>`:`<div class="l">โพสต์ข้อความ</div>`}</div>`}
         <div class="rk" style="background:${p.rank===1?'#FCA311':color}">${p.rank}</div>
         <div class="mt">${MT[p.media_type]||''}</div>
       </div>

@@ -134,9 +134,19 @@ def truncate(s, n):
 
 def fmt(n): return f"{n:,}"
 
-def img_for(key, i):
-    p = f"post_images_cropped/{key}_{i}.jpg"
-    return p if os.path.exists(p) else None
+def img_for(post):
+    """A post's own image, cropped if available.
+
+    Resolved from the path process.py recorded for THIS post rather than from
+    its rank, so a leftover file cannot appear under a post that has no image.
+    """
+    src = post.get('image_path')
+    if not src:
+        return None
+    cropped = os.path.join(ROOT, 'post_images_cropped', os.path.basename(src))
+    if os.path.exists(cropped):
+        return cropped
+    return src if os.path.exists(src) else None
 
 # ============ Slide 1: Title ============
 s = add_slide(); set_bg(s, DARK)
@@ -213,13 +223,15 @@ for key in ORDER:
         card_h = 4.95
         add_rect(s, cx, CARD_TOP, CARD_W, card_h, fill=CARD_BG, radius=0.05, shadow=True)
         ix, iy, iw, ih = cx + 0.06, CARD_TOP + 0.06, CARD_W - 0.12, IMG_H - 0.06
-        ip = img_for(key, i)
+        ip = img_for(post)
         if ip:
             s.shapes.add_picture(ip, Inches(ix), Inches(iy), Inches(iw), Inches(ih))
         else:
             add_rect(s, ix, iy, iw, ih, fill=tint(COLOR[key], 0.85), radius=0.04)
+            cap = (post.get('text') or '').strip()
+            body = (cap[:300] + ("…" if len(cap) > 300 else "")) if cap else "โพสต์ข้อความ"
             add_text(s, ix, iy, iw, ih, [("“", {"size": 30, "color": c, "bold": True, "align": PP_ALIGN.CENTER}),
-                                          ("โพสต์ข้อความ", {"size": 11, "color": MUTED, "bold": True, "align": PP_ALIGN.CENTER})],
+                                          (body, {"size": 9.5 if cap else 11, "color": MUTED, "bold": True, "align": PP_ALIGN.CENTER})],
                      anchor=MSO_ANCHOR.MIDDLE)
         add_badge(s, cx - 0.03, CARD_TOP - 0.03, 0.44, (ACCENT if i == 1 else c), str(i), fs=15)
         ty = CARD_TOP + IMG_H + 0.06

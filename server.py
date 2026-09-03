@@ -40,6 +40,7 @@ REFRESH_KEY = os.environ.get("REFRESH_KEY", "").strip()
 STEPS = [
     ("ดึงโพสต์จาก Apify", "scrape_apify.py"),
     ("ประมวลผลและดาวน์โหลดรูป", "process.py"),
+    ("ครอปรูปสัดส่วน 4:5", "crop.py"),
     ("สร้างสไลด์ PPTX", "build_slides.py"),
     ("สร้าง dashboard", "build_dashboard.py"),
 ]

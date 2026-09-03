@@ -3,10 +3,14 @@
 import os, glob
 from PIL import Image
 
-os.makedirs('post_images_cropped', exist_ok=True)
+ROOT = os.path.dirname(os.path.abspath(__file__))
+SRC = os.path.join(ROOT, 'post_images')
+DST = os.path.join(ROOT, 'post_images_cropped')
+
+os.makedirs(DST, exist_ok=True)
 TARGET = 4 / 5  # width / height
 
-for src in sorted(glob.glob('post_images/*.jpg')):
+for src in sorted(glob.glob(os.path.join(SRC, '*.jpg'))):
     name = os.path.basename(src)
     try:
         im = Image.open(src).convert('RGB')
@@ -23,6 +27,6 @@ for src in sorted(glob.glob('post_images/*.jpg')):
     # upscale small crops a bit for slide clarity, cap width 900
     if im.width > 900:
         im = im.resize((900, int(900 / TARGET)), Image.LANCZOS)
-    im.save(f'post_images_cropped/{name}', quality=88)
+    im.save(os.path.join(DST, name), quality=88)
     print("cropped", name, im.size)
 print("done")
