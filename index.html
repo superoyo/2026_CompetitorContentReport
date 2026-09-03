@@ -550,8 +550,12 @@ tabsEl.addEventListener('click',e=>{
 
   /* ---------- month picker ---------- */
   var now=new Date(), maxY=now.getFullYear(), maxM=now.getMonth()+1, minY=2024;
-  var start=(mpBtn.getAttribute('data-month')||'').split('-');
-  var sel={y:+start[0]||maxY, m:+start[1]||maxM}, viewY=sel.y;
+  /* Default the picker to the last completed month: the current month is
+     still in progress, so loading it would give partial numbers. data-month
+     keeps the month the page was BUILT from, so we can flag a mismatch. */
+  var built=(mpBtn.getAttribute('data-month')||'');
+  var prev=new Date(now.getFullYear(), now.getMonth()-1, 1);
+  var sel={y:prev.getFullYear(), m:prev.getMonth()+1}, viewY=sel.y;
 
   function pad(n){return (n<10?'0':'')+n;}
   function isoSel(){return sel.y+'-'+pad(sel.m);}
@@ -594,7 +598,12 @@ tabsEl.addEventListener('click',e=>{
     if(mpPop.classList.contains('open') && !mpPop.contains(e.target) && e.target!==mpBtn) openPop(false);
   });
   document.addEventListener('keydown',function(e){if(e.key==='Escape') openPop(false);});
-  drawLabel();drawGrid();
+  function builtNote(){
+    return (built && built!==isoSel())
+      ? 'หน้านี้แสดงข้อมูลเดือน '+thai(built)+' · ปฏิทินตั้งไว้ที่ '+thai(isoSel())
+      : '';
+  }
+  drawLabel();drawGrid();say(builtNote());
 
   /* ---------- refresh ---------- */
   function lbl(t){btn.querySelector('.rf-lbl').textContent=t;}
@@ -631,7 +640,8 @@ tabsEl.addEventListener('click',e=>{
   status().then(function(s){
     if(s.running){track();return;}
     if(!s.configured){btn.disabled=true;say('เซิร์ฟเวอร์ยังไม่ได้ตั้งค่า APIFY_TOKEN');return;}
-    if(s.last_finished) say('อัปเดตล่าสุด '+s.last_finished);
+    var n=builtNote();
+    say(s.last_finished ? (n ? n+' · ' : '')+'อัปเดตล่าสุด '+s.last_finished : n);
   })['catch'](function(){
     btn.disabled=true;
     say('หน้านี้เป็นไฟล์นิ่ง — เลือกเดือนแล้วกดโหลดได้บนเว็บที่รันบน Railway');

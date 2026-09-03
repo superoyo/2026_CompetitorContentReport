@@ -3,7 +3,8 @@
 
 Every pipeline step reads the month from $REPORT_MONTH (YYYY-MM) so that the
 scrape window, the post filter and the dashboard labels can never drift apart.
-Defaults to 2026-05, the month the report was first built for.
+With $REPORT_MONTH unset it defaults to the most recently completed month —
+the current month is still in progress, so its numbers would be partial.
 
     REPORT_MONTH=2026-06 python3 scrape_apify.py
 """
@@ -12,7 +13,11 @@ import datetime
 import os
 import re
 
-DEFAULT = "2026-05"
+def default_month():
+    """The last completed month, e.g. 2026-08 when run any day in Sep 2026."""
+    first_of_this = datetime.date.today().replace(day=1)
+    last_of_prev = first_of_this - datetime.timedelta(days=1)
+    return "%04d-%02d" % (last_of_prev.year, last_of_prev.month)
 
 TH_FULL = ["มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน",
            "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"]
@@ -34,7 +39,7 @@ def parse(value):
 
 def info(value=None):
     """Return every label and boundary derived from the report month."""
-    iso = value or os.environ.get("REPORT_MONTH", DEFAULT).strip() or DEFAULT
+    iso = value or os.environ.get("REPORT_MONTH", "").strip() or default_month()
     year, month = parse(iso)
     ndays = calendar.monthrange(year, month)[1]
     first = datetime.date(year, month, 1)
