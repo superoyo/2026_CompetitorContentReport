@@ -321,6 +321,11 @@ HTML = r'''<!DOCTYPE html>
   .bd-go:disabled{opacity:.45;cursor:not-allowed}
   .bd-cancel{font-family:var(--head);font-size:13px;font-weight:700;color:#5A6675;background:var(--panel2);
     border:1px solid var(--line);padding:10px 18px;border-radius:999px;cursor:pointer}
+  /* The key on a locked button is the whole point of it — never let it fall
+     back to a tofu box on a machine without the emoji. */
+  .ic{font-family:"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif;
+    font-size:13px;line-height:1;display:inline-block}
+  .ic:empty{display:none}
   .an-btn{font-family:var(--head);font-size:13px;font-weight:700;color:#6B3FA0;background:#F3EDFB;
     border:1px solid #DCCBF2;padding:10px 16px;border-radius:999px;cursor:pointer;display:flex;
     align-items:center;gap:7px;box-shadow:var(--shadow);white-space:nowrap;transition:.15s}
@@ -391,10 +396,11 @@ HTML = r'''<!DOCTYPE html>
             <span>⬇</span><span id="pptLbl">ดาวน์โหลด PPT</span>
           </a>
           <button id="anBtn" class="an-btn" type="button" hidden>
-            <span>✨</span><span id="anLbl">เขียนบทวิเคราะห์</span>
+            <span class="ic" id="anIc">✨</span><span id="anLbl">เขียนบทวิเคราะห์</span>
           </button>
           <button id="refreshBtn" class="rf-btn" type="button">
-            <span class="rf-sp"></span><span class="rf-lbl">โหลดข้อมูลใหม่</span>
+            <span class="rf-sp"></span><span class="ic" id="rfIc"></span
+            ><span class="rf-lbl">โหลดข้อมูลใหม่</span>
           </button>
         </div>
         <div class="rf-msg" id="rfMsg"></div>
@@ -1031,6 +1037,45 @@ window.FBDASH = {group:'', months:{}, brands:[], ready:false};
   drawLabel();drawGrid();say(builtNote());publish();stateNote();
 
   /* ---------- refresh ---------- */
+  /* ---------- the refresh key ----------
+     Both buttons spend money, so both are gated on the same secret. Show a key
+     on them until this session holds one that the server has accepted, and
+     check what gets typed against the server there and then: finding out from
+     a job that refuses to start tells you far too late, and tells you next to
+     nothing about which of the two things was wrong. */
+  function locked(){return !sessionStorage.getItem(SK);}
+
+  function paintLocks(){
+    var ri=document.getElementById('rfIc'), ai=document.getElementById('anIc');
+    if(ri) ri.textContent = locked() ? '🔑' : '';
+    if(ai) ai.textContent = locked() ? '🔑' : '✨';
+    var t = locked() ? 'ต้องใส่ Refresh key ก่อนใช้ปุ่มนี้' : '';
+    btn.title = t;
+    var ab=document.getElementById('anBtn'); if(ab) ab.title = t;
+  }
+
+  /* Calls done() once a key the server accepts is in hand. */
+  function unlock(done){
+    var k=sessionStorage.getItem(SK);
+    if(k){done(k);return;}
+    k=prompt('ใส่ Refresh key (ค่าเดียวกับตัวแปร REFRESH_KEY บนเซิร์ฟเวอร์)');
+    if(!k) return;
+    say('กำลังตรวจ Refresh key…');
+    fetch('api/verify-key',{headers:{'X-Refresh-Key':k},cache:'no-store'})
+      .then(function(r){
+        if(r.status===401){say('Refresh key ไม่ถูกต้อง — กดปุ่มอีกครั้งเพื่อลองใหม่');return;}
+        if(!r.ok){
+          return r.json()['catch'](function(){return {};}).then(function(j){
+            say(j.error||('ตรวจ Refresh key ไม่ได้ ('+r.status+')'));
+          });
+        }
+        sessionStorage.setItem(SK,k); paintLocks(); say(''); done(k);
+      })['catch'](function(){say('เชื่อมต่อเซิร์ฟเวอร์ไม่ได้');});
+  }
+
+  /* A key the server later rejects is a key worth forgetting. */
+  function forgetKey(){sessionStorage.removeItem(SK);paintLocks();}
+
   function lbl(t){btn.querySelector('.rf-lbl').textContent=t;}
   function busy(on){btn.classList.toggle('busy',on);btn.disabled=on;mpBtn.disabled=on;}
   function say(t){msg.textContent=t||'';}
@@ -1098,12 +1143,7 @@ window.FBDASH = {group:'', months:{}, brands:[], ready:false};
     ab.addEventListener('click',function(){
       var group=(window.FBDASH||{}).group||'';
       if(!group) return;
-      var k=sessionStorage.getItem(SK);
-      if(!k){
-        k=prompt('ใส่ Refresh key (ค่าเดียวกับตัวแปร REFRESH_KEY บนเซิร์ฟเวอร์)');
-        if(!k) return;
-        sessionStorage.setItem(SK,k);
-      }
+      unlock(function(k){
       ab.disabled=true; al.textContent='กำลังเขียน…';
       say('ให้ Claude เขียนบทวิเคราะห์เดือน '+thai(thisMonth)+' — ไม่เรียก Apify');
       fetch('api/analyse',{
@@ -1111,7 +1151,7 @@ window.FBDASH = {group:'', months:{}, brands:[], ready:false};
         headers:{'X-Refresh-Key':k,'Content-Type':'application/json'},
         body:JSON.stringify({group:group,month:thisMonth})
       }).then(function(r){
-        if(r.status===401){sessionStorage.removeItem(SK);ab.disabled=false;
+        if(r.status===401){forgetKey();ab.disabled=false;
           al.textContent='เขียนบทวิเคราะห์';say('Refresh key ไม่ถูกต้อง ลองอีกครั้ง');return;}
         if(!r.ok){
           return r.json()['catch'](function(){return {};}).then(function(j){
@@ -1123,6 +1163,7 @@ window.FBDASH = {group:'', months:{}, brands:[], ready:false};
       })['catch'](function(){
         ab.disabled=false; al.textContent='เขียนบทวิเคราะห์';
         say('เชื่อมต่อเซิร์ฟเวอร์ไม่ได้');
+      });
       });
     });
   })();
@@ -1138,12 +1179,7 @@ window.FBDASH = {group:'', months:{}, brands:[], ready:false};
     if(have(isoSel()) && !confirm('เดือน '+thai(isoSel())+' มีข้อมูลอยู่แล้ว\n\n'
         +'ต้องการดึงข้อมูลใหม่หรือไม่? ข้อมูลเดิมของเดือนนี้จะถูกแทนที่ '
         +'และมีค่าใช้จ่าย Apify ตามจำนวนโพสต์')) return;
-    var k=sessionStorage.getItem(SK);
-    if(!k){
-      k=prompt('ใส่ Refresh key (ค่าเดียวกับตัวแปร REFRESH_KEY บนเซิร์ฟเวอร์)');
-      if(!k) return;
-      sessionStorage.setItem(SK,k);
-    }
+    unlock(function(k){
     lbl('กำลังเริ่ม…'); busy(true); say('เดือน '+thai(isoSel()));
     fetch('api/refresh',{
       method:'POST',
@@ -1151,7 +1187,7 @@ window.FBDASH = {group:'', months:{}, brands:[], ready:false};
       body:JSON.stringify({month:isoSel(),group:group})
     }).then(function(r){
       if(r.status===409){track();return;}
-      if(r.status===401){sessionStorage.removeItem(SK);busy(false);lbl('โหลดข้อมูลใหม่');say('Refresh key ไม่ถูกต้อง ลองอีกครั้ง');return;}
+      if(r.status===401){forgetKey();busy(false);lbl('โหลดข้อมูลใหม่');say('Refresh key ไม่ถูกต้อง ลองอีกครั้ง');return;}
       if(!r.ok){
         return r.json()['catch'](function(){return {};}).then(function(j){
           busy(false);lbl('โหลดข้อมูลใหม่');say(j.error||('เริ่มงานไม่สำเร็จ ('+r.status+')'));
@@ -1161,7 +1197,10 @@ window.FBDASH = {group:'', months:{}, brands:[], ready:false};
     })['catch'](function(){
       busy(false);lbl('โหลดข้อมูลใหม่');say('เชื่อมต่อเซิร์ฟเวอร์ไม่ได้');
     });
+    });
   });
+
+  paintLocks();
 })();
 
   /* ---------- PPTX download ---------- */

@@ -533,6 +533,16 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                              "storage_note": store.why_unavailable()})
             return
 
+        if route.endswith("/api/verify-key"):
+            # Lets the page check a key at the moment it is typed. Without this
+            # the first sign of a wrong key is a job that refuses to start.
+            if not REFRESH_KEY:
+                self._json(503, {"error": "ยังไม่ได้ตั้ง REFRESH_KEY บนเซิร์ฟเวอร์"}); return
+            if not self._authorised():
+                self._json(401, {"error": "refresh key ไม่ถูกต้อง"}); return
+            self._json(200, {"ok": True})
+            return
+
         if route.endswith("/api/selftest"):
             # Behind the shared secret: it names the services and makes a real
             # (tiny) Claude call, neither of which a passer-by should trigger.
