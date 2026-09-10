@@ -326,6 +326,36 @@ HTML = r'''<!DOCTYPE html>
     align-items:center;gap:7px;box-shadow:var(--shadow);white-space:nowrap;transition:.15s}
   .an-btn:hover:not(:disabled){background:#EADFF8;border-color:#6B3FA0;transform:translateY(-1px)}
   .an-btn:disabled{opacity:.55;cursor:progress;transform:none}
+  /* competitor summary: ranked table beside the standing of our own page */
+  .cs-wrap{display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:18px;margin-top:16px;align-items:start}
+  @media(max-width:1080px){.cs-wrap{grid-template-columns:1fr}}
+  .cs-scroll{overflow-x:auto}
+  .cs-cell{display:inline-flex;align-items:center;gap:6px;justify-content:flex-end}
+  .medal{width:19px;height:19px;border-radius:50%;display:inline-grid;place-items:center;
+    font-family:var(--head);font-size:10.5px;font-weight:800;color:#fff;flex:none;
+    box-shadow:0 1px 2px rgba(16,24,40,.25)}
+  .medal.m1{background:#16A34A}
+  .medal.m2{background:#D9A404}
+  .medal.m3{background:#DC2626}
+  .mo tr.cs-me td{background:#F0FBF4}
+  .mo tr.cs-me td:first-child{box-shadow:inset 3px 0 0 #16A34A}
+  .cs-side{background:var(--panel2);border:1px solid var(--line);border-radius:14px;padding:15px 16px}
+  .cs-side h3{font-family:var(--head);font-size:13px;font-weight:800;color:#1B2430;margin-bottom:3px}
+  .cs-who{font-size:11px;color:#7A8694;margin-bottom:12px}
+  .cs-m{padding:7px 0;border-bottom:1px dashed var(--line)}
+  .cs-m:last-of-type{border-bottom:none}
+  .cs-m .lbl{font-family:var(--head);font-size:11px;font-weight:800;color:#5A6675;
+    text-decoration:underline;text-underline-offset:2px}
+  .cs-m .val{font-size:12.5px;color:#1B2430;margin-top:3px}
+  .cs-m .val b{font-family:var(--head)}
+  .cs-m .pl{color:#7A8694}
+  .cs-note{margin-top:13px;padding-top:12px;border-top:1px solid var(--line)}
+  .cs-note h4{font-family:var(--head);font-size:11.5px;font-weight:800;color:#0B7B57;margin-bottom:7px}
+  .cs-note ul{list-style:none;display:flex;flex-direction:column;gap:8px}
+  .cs-note li{font-size:12px;line-height:1.62;color:#42505F;padding-left:13px;position:relative}
+  .cs-note li:before{content:'';position:absolute;left:0;top:6px;width:5px;height:5px;
+    border-radius:50%;background:#0B7B57}
+  .cs-empty{font-size:12px;color:#7A8694;line-height:1.6}
   /* per-brand summary, bottom of the page */
   .bs-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(268px,1fr));gap:15px;margin-top:17px}
   .bs{background:var(--panel2);border:1px solid var(--line);border-radius:14px;padding:15px 16px 13px}
@@ -474,6 +504,15 @@ HTML = r'''<!DOCTYPE html>
 
   <div id="klWrap"></div>
 
+  <div class="card comp-sum">
+    <h2>SUMMARY COMPETITOR — __M_TH__ __M_BE__</h2>
+    <div class="hint">อันดับของแต่ละเพจในทุกคอลัมน์ (เหรียญ = อันดับ 1–3 ของคอลัมน์นั้น เพจที่คะแนนเท่ากันได้อันดับเดียวกัน) พร้อมสรุปตำแหน่งของแบรนด์เราด้านขวา</div>
+    <div class="cs-wrap">
+      <div class="cs-scroll"><table class="mo cs" id="csTable"></table></div>
+      <aside class="cs-side" id="csSide"></aside>
+    </div>
+  </div>
+
   <div class="card brand-sum">
     <h2>สรุปรายเพจ — __M_TH__ __M_BE__</h2>
     <div class="hint">ตัวเลขรวมของแต่ละเพจในเดือนนี้ พร้อมฟอร์แมตที่ได้ Engagement เฉลี่ยสูงสุด, วันที่โพสต์แล้วเวิร์กที่สุด และสัดส่วนคอนเทนต์ที่ลงจริง</div>
@@ -597,6 +636,68 @@ new Chart(document.getElementById('barChart'),{
     scales:{x:{ticks:{color:'#7C8797',font:{size:11,family:'Sarabun'}},grid:{display:false}},
       y:{ticks:{color:'#7C8797',callback:v=>fmt(v)},grid:{color:'#EAEDF2'}}}}
 });
+
+/* Competitor summary: the same figures as Metrics Overview, but with each
+   column's top three medalled, and our own page's standing spelled out beside
+   it. The standing lines are computed; the commentary under them is what
+   analyse.py wrote about this month. */
+const CS_COLS = [
+  {f:'ppi',      th:'Page Performance<br>Index', lbl:'Page Performance Index', fmt:v=>v+'%'},
+  {f:'fans',     th:'Followers',                 lbl:'Followers',              fmt:v=>fansFmt(v)},
+  {f:'growth',   th:'Follower<br>Growth',        lbl:'Follower Growth',        fmt:v=>(v>0?'+':'')+pct(v)},
+  {f:'posts',    th:'Number<br>of posts',        lbl:'Number of posts',        fmt:v=>fmt(v)+' คอนเทนต์'},
+  {f:'likes',    th:'Number of<br>Reactions',    lbl:'Number of Reactions',    fmt:v=>fmt(v)},
+  {f:'comments', th:'Number of<br>comments',     lbl:'Number of comments',     fmt:v=>fmt(v)+' คอมเมนต์'},
+  {f:'shares',   th:'Number of<br>Shares',       lbl:'Number of Shares',       fmt:v=>fmt(v)+' ครั้ง'},
+  {f:'er',       th:'Engagement',                lbl:'Engagement',             fmt:v=>pct(v)},
+];
+
+/* Written from our own page's side. Falls back to whichever page analyse.py
+   wrote the commentary about, so the table and the panel never disagree. */
+const csMe = DATA.owned
+  || Object.keys(DATA.keylearning||{})[0]
+  || ((DATA.mo||[])[0]||{}).key || '';
+
+const medal = n => (n>=1 && n<=3) ? `<span class="medal m${n}">${n}</span>` : '';
+
+document.getElementById('csTable').innerHTML = `
+  <thead><tr><th class="l">Name</th>${CS_COLS.map(c=>`<th>${c.th}</th>`).join('')}</tr></thead>
+  <tbody>${(DATA.mo||[]).map(r=>`<tr class="${r.key===csMe?'cs-me':''}">
+    <td class="l"><div class="mo-name">
+      ${r.logo?`<img src="${r.logo}" alt="">`:`<div class="mo-badge" style="background:${r.color}">${r.name[0]}</div>`}
+      <div><div class="nm">${r.name}</div><div class="hd">@${r.handle||r.key.toLowerCase()}</div></div></div></td>
+    ${CS_COLS.map(c=>{
+      const v = r[c.f], rk = (r.rank||{})[c.f];
+      return `<td class="num"><span class="cs-cell">${medal(rk)}${v==null?'—':c.fmt(v)}</span></td>`;
+    }).join('')}
+  </tr>`).join('')}</tbody>`;
+
+(function(){
+  const me = (DATA.mo||[]).find(r=>r.key===csMe);
+  const side = document.getElementById('csSide');
+  if(!me){
+    side.innerHTML = '<div class="cs-empty">ยังไม่มีข้อมูลเดือนนี้ให้สรุปตำแหน่ง</div>';
+    return;
+  }
+  const short = me.name.replace(' Thailand','').replace(' Society','');
+  const total = (DATA.mo||[]).length;
+  const lines = CS_COLS.map(c=>{
+    const v = me[c.f], rk = (me.rank||{})[c.f];
+    const val = v==null
+      ? '<span class="pl">ยังไม่มีข้อมูล</span>'
+      : `<b>${c.fmt(v)}</b>` + (rk?` <span class="pl">(อันดับ ${rk} จาก ${total})</span>`:'');
+    return `<div class="cs-m"><div class="lbl">${c.lbl}</div>
+      <div class="val">${esc(short)} ทำได้ ${val}</div></div>`;
+  }).join('');
+  const kl = (DATA.keylearning||{})[csMe];
+  const note = kl
+    ? `<div class="cs-note"><h4>${esc(kl.title||'สิ่งที่ควรทำต่อ')}</h4>
+       <ul>${(kl.points||[]).map(p=>`<li>${p}</li>`).join('')}</ul></div>`
+    : `<div class="cs-note"><div class="cs-empty">ยังไม่มีบทวิเคราะห์ของเดือนนี้ — กดเขียนบทวิเคราะห์เพื่อสร้าง</div></div>`;
+  side.innerHTML = `<h3>สรุปตำแหน่งของแบรนด์เรา</h3>
+    <div class="cs-who">${esc(me.name)} · เทียบกับ ${total} เพจในกลุ่มนี้</div>
+    ${lines}${note}`;
+})();
 
 /* Per-brand summary. Holds what the Metrics Overview table stopped showing
    when it moved to the reference report's columns: engagement totals, the

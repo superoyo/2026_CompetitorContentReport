@@ -43,7 +43,7 @@ def blank(month, group_id, brands):
                 "handle": (b.get("url", "").rstrip("/").rsplit("/", 1)[-1] or "").lower(),
                 "posts": 0, "likes": 0, "comments": 0, "shares": 0, "total": 0,
                 "avg": 0, "fans": None, "fans_at": "", "fans_prev": None, "growth": None,
-                "er": None, "ppi": None,
+                "er": None, "ppi": None, "rank": {},
                 "best_format": "—", "best_dow": "—"} for b in brands],
         "mo_max": {c: 0 for c in ("posts", "likes", "comments", "shares", "total", "avg")},
         "agg": agg,
@@ -54,6 +54,7 @@ def blank(month, group_id, brands):
         "metrics": metrics,
         "ai": {}, "summary": {}, "keylearning": {},
         "stats_error": "", "has_prev_fans": False, "growth_note": "",
+        "owned": next((b["key"] for b in brands if b.get("owned")), ""),
         "grand_total": 0, "total_posts": 0,
     }
 
@@ -152,6 +153,26 @@ def _ppi(rows):
     for r in usable:
         r['ppi'] = round(100 * (0.55 * er[id(r)] + 0.25 * gro[id(r)] + 0.20 * vol[id(r)]))
 
+
+
+# Columns the competitor summary ranks. Higher is better in every one of them.
+RANKED = ('ppi', 'fans', 'growth', 'posts', 'likes', 'comments', 'shares', 'er')
+
+
+def _rank(rows):
+    """Rank every page within each column, ties sharing a place.
+
+    Competition ranking (1, 1, 3), so two pages level on posts both read as
+    first and nothing claims second. A page with no value for a column — no
+    follower count, so no growth or engagement rate — gets no rank there
+    rather than being sorted to the bottom as if it scored zero.
+    """
+    for r in rows:
+        r['rank'] = {}
+    for f in RANKED:
+        have = [r for r in rows if r.get(f) is not None]
+        for r in have:
+            r['rank'][f] = 1 + sum(1 for o in have if o[f] > r[f])
 
 
 def build():
@@ -283,10 +304,12 @@ def build():
                        'ซึ่งเกิดจากการย้อนไปดึงเดือนเก่าทีหลัง ไม่ใช่การเติบโตจริงตลอดเดือน '
                        'จึงไม่แสดงค่า' % MIN_GROWTH_GAP_DAYS)
     _ppi(metrics_overview)
+    _rank(metrics_overview)
 
     DATA = {
         'brands': [{'key': b['key'], 'name': b['name'], 'letter': b['letter'], 'color': b['color']} for b in BRANDS],
         'mo': metrics_overview, 'mo_max': mo_max,
+        'owned': next((b['key'] for b in BRANDS if b.get('owned')), ''),
         # Why the follower columns are blank, when they are.
         'stats_error': stats_error,
         'has_prev_fans': bool(PREV),
