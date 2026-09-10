@@ -72,16 +72,11 @@ HTML = r'''<!DOCTYPE html>
   *{box-sizing:border-box;margin:0;padding:0}
   body{font-family:var(--body);background:var(--bg);color:var(--txt);
     padding:34px 40px 72px;max-width:1360px;margin:0 auto;-webkit-font-smoothing:antialiased}
-  h1,h2,h3,h4,.val,.big,.dot,.tab,.kpi .val,.n{font-family:var(--head)}
+  h1,h2,h3,h4,.val,.big,.dot,.tab,.n{font-family:var(--head)}
   .head{display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:16px;margin-bottom:28px}
   .head h1{font-size:30px;font-weight:800;letter-spacing:-.5px;font-family:var(--head)}
   .head .sub{color:var(--muted);font-size:14px;margin-top:8px}
   .badge{background:#FFF3DF;color:#9A5B00;font-weight:700;padding:8px 16px;border-radius:999px;font-size:13px;font-family:var(--head);border:1px solid #F6E2BE}
-  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:18px;margin-bottom:26px}
-  .kpi{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:20px 22px;box-shadow:var(--shadow)}
-  .kpi .label{color:var(--muted);font-size:12px;font-weight:600;letter-spacing:.3px}
-  .kpi .val{font-size:33px;font-weight:800;margin-top:9px;line-height:1;color:var(--txt)}
-  .kpi .foot{color:var(--muted);font-size:12px;margin-top:9px}
   .grid{display:grid;grid-template-columns:1.35fr 1fr;gap:20px;margin-bottom:24px}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:22px 24px;box-shadow:var(--shadow)}
   .card h2{font-size:17px;font-weight:700;margin-bottom:4px;color:var(--txt)}
@@ -218,7 +213,7 @@ HTML = r'''<!DOCTYPE html>
   .mo-badge{width:38px;height:38px;border-radius:50%;display:grid;place-items:center;font-weight:800;color:#fff;font-family:var(--head);flex:none}
   .pos{color:#16A34A}.neg{color:#DC2626}
   .pill{display:inline-block;padding:3px 11px;border-radius:999px;font-family:var(--head);font-weight:800;font-size:12.5px}
-  @media(max-width:1100px){.kpis{grid-template-columns:repeat(2,1fr)}.grid{grid-template-columns:1fr}.posts{grid-template-columns:repeat(2,1fr)}}
+  @media(max-width:1100px){.grid{grid-template-columns:1fr}.posts{grid-template-columns:repeat(2,1fr)}}
   .head-right{display:flex;align-items:center;gap:12px;flex-wrap:wrap;justify-content:flex-end}
   .rf-wrap{display:flex;flex-direction:column;align-items:flex-end;gap:5px}
   .rf-row{display:flex;align-items:center;gap:9px}
@@ -346,22 +341,6 @@ HTML = r'''<!DOCTYPE html>
     align-items:center;gap:7px;box-shadow:var(--shadow);white-space:nowrap;transition:.15s;text-decoration:none}
   .pt-btn:hover{background:#D8F1E6;border-color:#0B7B57;transform:translateY(-1px)}
   .pt-btn.off{background:#F1F3F6;border-color:var(--line);color:#9AA5B1;cursor:not-allowed;transform:none}
-  /* cost box */
-  .cost-box .cost-top{display:flex;flex-wrap:wrap;gap:22px;align-items:center;margin:16px 0 18px}
-  .cost-big{font-family:var(--head);font-size:38px;font-weight:800;color:#0B2545;line-height:1}
-  .cost-big small{display:block;font-size:12px;font-weight:600;color:#7A8694;margin-top:6px;letter-spacing:.2px}
-  .cost-brk{flex:1;min-width:260px}
-  .cost-t{width:100%;border-collapse:collapse;font-size:12.5px}
-  .cost-t th,.cost-t td{padding:7px 10px;text-align:right;border-bottom:1px solid var(--line)}
-  .cost-t th:first-child,.cost-t td:first-child{text-align:left}
-  .cost-t thead th{font-family:var(--head);font-size:11px;font-weight:800;color:#7A8694;letter-spacing:.3px;
-    text-transform:uppercase;border-bottom:1.5px solid var(--line)}
-  .cost-t tbody tr:last-child td{border-bottom:none}
-  .cost-t .mine{background:#FFF8E8;font-weight:800}
-  .cost-t code{font-size:11.5px;color:#5A6675}
-  .cost-warn{background:#FFF6E5;border:1px solid #F6E2BE;border-radius:11px;padding:12px 14px;
-    font-size:12px;color:#7A5A22;line-height:1.6;margin-top:14px}
-  .cost-warn b{color:#9A5B00}
 </style>
 </head>
 <body>
@@ -442,7 +421,6 @@ HTML = r'''<!DOCTYPE html>
 
   <div class="mo-card" id="moCard"></div>
 
-  <div class="kpis" id="kpis"></div>
 
   <div class="grid">
     <div class="card">
@@ -455,12 +433,6 @@ HTML = r'''<!DOCTYPE html>
       <div class="hint">เรียงตาม Engagement รวมสูงสุด</div>
       <div class="rank-list" id="rankList"></div>
     </div>
-  </div>
-
-  <div class="card" style="margin-bottom:24px">
-    <h2>แนวโน้ม Engagement รายวัน</h2>
-    <div class="hint">ยอด Engagement รวมของโพสต์แต่ละวัน ตลอดเดือน__M_TH__</div>
-    <div class="chart-wrap" style="height:300px"><canvas id="lineChart"></canvas></div>
   </div>
 
   <div class="card allbox">
@@ -482,13 +454,6 @@ HTML = r'''<!DOCTYPE html>
   </div>
 
   <div id="klWrap"></div>
-
-  <div class="card cost-box">
-    <h2>ค่าใช้จ่ายต่อการกดโหลดข้อมูล 1 ครั้ง</h2>
-    <div class="hint">Actor <code>apify/facebook-posts-scraper</code> คิดเงินแบบ pay-per-event
-      (ราคาดึงจาก Apify API เมื่อ 3 ก.ย. 2569) &middot; ประเมินจากจำนวนโพสต์ที่ดึงได้จริงในเดือนนี้</div>
-    <div id="costBody"></div>
-  </div>
 
   <div class="foot-note">
     <b>หมายเหตุ:</b> ข้อมูลดึงจากโพสต์สาธารณะบนเพจ Facebook ผ่านเครื่องมือสแครปข้อมูล (Apify) ไม่ใช่ตัวเลขจาก Facebook Page Insights โดยตรง &middot;
@@ -514,7 +479,6 @@ const LOGO = Object.fromEntries((DATA.mo||[]).map(r=>[r.key, r.logo||'']));
 const maxTotal = Math.max(...DATA.brands.map(b=>DATA.agg[b.key].total));
 /* With no group picked there are no brands at all, so keep a stand-in rather
    than letting every tile that reads a colour off it throw. */
-const topBrand = order[0] || {key:'', name:'—', color:'#8A94A2'};
 
 // Metrics Overview table — derived entirely from the scraped May posts
 const mo = DATA.mo, mmax = DATA.mo_max;
@@ -582,25 +546,6 @@ document.getElementById('moCard').innerHTML = `
     ผู้ติดตามดึงจาก Apify actor <code>facebook-pages-scraper</code> ณ วันที่ดึงข้อมูล ไม่ใช่ค่าเฉลี่ยของเดือน
   </div>`;
 
-/* Before a month is fetched every total is zero, so guard the two tiles that
-   would otherwise read NaN or name a "top" page out of an all-zero table. */
-const kpis = [
-  {label:'Engagement รวมทั้งหมด', val:fmt(DATA.grand_total), foot:DATA.total_posts+' โพสต์จาก __M_PAGES__ เพจ'},
-  {label:'เพจ Engagement สูงสุด',
-   val: DATA.grand_total ? topBrand.name.replace(' Thailand','') : '—',
-   foot: DATA.grand_total ? fmt(DATA.agg[topBrand.key].total)+' engagement' : 'ยังไม่มีข้อมูลเดือนนี้'},
-  {label:'โพสต์ทั้งหมด', val:fmt(DATA.total_posts), foot:'รวมทุกเพจในเดือน __M_ABBR__'},
-  {label:'Engagement เฉลี่ย/โพสต์',
-   val: DATA.total_posts ? fmt(Math.round(DATA.grand_total/DATA.total_posts)) : '—',
-   foot:'ค่าเฉลี่ยรวมทุกเพจ'},
-];
-document.getElementById('kpis').innerHTML = kpis.map((k,i)=>`
-  <div class="kpi">
-    <div class="label">${k.label}</div>
-    <div class="val" style="color:${i===1?topBrand.color:'var(--txt)'}">${k.val}</div>
-    <div class="foot">${k.foot}</div>
-  </div>`).join('');
-
 document.getElementById('rankList').innerHTML = order.map((b,i)=>{
   const t = DATA.agg[b.key].total;
   const pct = (t/maxTotal*100).toFixed(1);
@@ -623,20 +568,6 @@ new Chart(document.getElementById('barChart'),{
   options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},
     tooltip:{callbacks:{label:c=>' '+fmt(c.parsed.y)+' engagement'}}},
     scales:{x:{ticks:{color:'#7C8797',font:{size:11,family:'Sarabun'}},grid:{display:false}},
-      y:{ticks:{color:'#7C8797',callback:v=>fmt(v)},grid:{color:'#EAEDF2'}}}}
-});
-
-const dayLabels = DATA.days.map(d=>parseInt(d.slice(-2),10));
-new Chart(document.getElementById('lineChart'),{
-  type:'line',
-  data:{labels:dayLabels,
-    datasets:DATA.brands.map(b=>({label:short(b.key),
-      data:DATA.daily[b.key],borderColor:b.color,backgroundColor:b.color+'22',
-      borderWidth:2,tension:.35,pointRadius:0,pointHoverRadius:5,fill:false}))},
-  options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
-    plugins:{legend:{labels:{color:'#4B5768',usePointStyle:true,pointStyle:'circle',padding:14,font:{size:12,family:'Sarabun'}}},
-      tooltip:{callbacks:{title:c=>'วันที่ '+c[0].label+' __M_ABBR__',label:c=>' '+c.dataset.label+': '+fmt(c.parsed.y)}}},
-    scales:{x:{ticks:{color:'#7C8797',maxTicksLimit:15},grid:{display:false},title:{display:true,text:'วันที่',color:'#7C8797'}},
       y:{ticks:{color:'#7C8797',callback:v=>fmt(v)},grid:{color:'#EAEDF2'}}}}
 });
 
@@ -1345,52 +1276,6 @@ window.FBDASH = {group:'', months:{}, brands:[], ready:false};
     retarget(mp?(mp.getAttribute('data-sel')||built):built);
   })();
 
-  /* ---------- Apify cost estimate ---------- */
-  (function(){
-    var host=document.getElementById('costBody'); if(!host) return;
-    var N=DATA.total_posts||0;
-    var START=0.001;                     // actor-start, flat, every tier
-    var THB=33;                          // assumed FX rate, stated in the note
-    /* [tier, $/post, $/post for the date-filter add-on] */
-    var T=[['FREE',0.005,0.002],['BRONZE',0.004,0.001],['SILVER',0.0025,0.0008],
-           ['GOLD',0.002,0.0006],['PLATINUM',0.0016,0.0004],['DIAMOND',0.0008,0.0002]];
-    /* keep sub-cent rows readable: $0.001 must not render as $0.00 */
-    function money(v){return '$'+(v<0.01 ? v.toFixed(3) : v.toFixed(2));}
-    var free=T[0];
-
-    /* A second actor (facebook-pages-scraper) supplies the follower counts. */
-    var PAGE_FEE=0.012, NP=(DATA.mo||[]).length;
-    var brk='<table class="cost-t"><thead><tr><th>รายการ</th><th>สูตร</th><th>ราคา</th></tr></thead><tbody>'
-      +'<tr><td>เริ่มรัน actor</td><td><code>คิดครั้งเดียว</code></td><td>'+money(START)+'</td></tr>'
-      +'<tr><td>โพสต์ที่ดึงได้</td><td><code>'+N+' × $'+free[1].toFixed(4)+'</code></td><td>'+money(N*free[1])+'</td></tr>'
-      +'<tr><td>ตัวกรองช่วงวันที่</td><td><code>'+N+' × $'+free[2].toFixed(4)+'</code></td><td>'+money(N*free[2])+'</td></tr>'
-      +'<tr><td>ดึงจำนวนผู้ติดตาม</td><td><code>'+NP+' เพจ × $'+PAGE_FEE.toFixed(3)+'</code></td><td>'+money(NP*PAGE_FEE)+'</td></tr>'
-      +'</tbody></table>';
-
-    var freeTotal=START+N*free[1]+N*free[2]+NP*PAGE_FEE;
-    var tiers='<table class="cost-t"><thead><tr><th>แผน Apify</th><th>ต่อโพสต์</th>'
-      +'<th>ต่อครั้ง ('+N+' โพสต์)</th><th>ถ้าเดือนละครั้ง (ต่อปี)</th></tr></thead><tbody>';
-    for(var i=0;i<T.length;i++){
-      var t=T[i], per=START+N*t[1]+N*t[2]+NP*PAGE_FEE;
-      tiers+='<tr'+(i===0?' class="mine"':'')+'><td>'+t[0]+(i===0?' (ค่าเริ่มต้น)':'')+'</td>'
-        +'<td><code>$'+(t[1]+t[2]).toFixed(4)+'</code></td><td>'+money(per)+'</td>'
-        +'<td>'+money(per*12)+'</td></tr>';
-    }
-    tiers+='</tbody></table>';
-
-    host.innerHTML='<div class="cost-top">'
-      +'<div class="cost-big">≈ '+money(freeTotal)
-      +'<small>≈ '+Math.round(freeTotal*THB)+' บาท &middot; แผน FREE &middot; '+N+' โพสต์</small></div>'
-      +'<div class="cost-brk">'+brk+'</div></div>'
-      +tiers
-      +'<div class="cost-warn"><b>อ่านก่อนใช้:</b> ตัวเลขนี้เป็นการประเมิน ไม่ใช่ยอดที่เรียกเก็บจริง &middot; '
-      +'แถวไฮไลต์คือแผน FREE ซึ่งเป็นค่าเริ่มต้น หากบัญชีอยู่แผนสูงกว่าจะถูกลงได้ถึง 7 เท่า '
-      +'(ดูแผนจริงที่ Apify Console &rarr; Billing) &middot; '
-      +'Apify ระบุว่าค่าตัวกรองวันที่คิด<b>ต่อโพสต์ที่ scrape</b> ไม่ใช่ต่อโพสต์ที่ได้กลับมา '
-      +'ยอดจริงจึงอาจสูงกว่านี้เพราะ actor ต้องไล่โพสต์ที่อยู่นอกช่วงวันที่ด้วย &middot; '
-      +'ค่าใช้จ่ายเกิดที่ขั้น scrape เท่านั้น ขั้นประมวลผล/สร้างสไลด์/สร้างหน้าเว็บ ไม่มีค่า Apify &middot; '
-      +'อัตราแลกเปลี่ยนใช้ 33 บาท/USD โดยประมาณ</div>';
-  })();
 </script>
 </body>
 </html>'''
