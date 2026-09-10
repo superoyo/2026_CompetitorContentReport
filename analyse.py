@@ -50,6 +50,11 @@ def client():
     headers = {"anthropic-workspace-id": WORKSPACE} if WORKSPACE else None
     return anthropic.Anthropic(api_key=KEY, default_headers=headers)
 
+# Output ceiling for one commentary run. Adaptive thinking is billed as output
+# too, so this has to cover reasoning plus a page of prose per brand. Streaming
+# is required at this size or the request hits the SDK's HTTP timeout.
+MAX_TOKENS = 64000
+
 # $ per million tokens, for the line printed at the end of the run.
 PRICES = {
     "claude-opus-5": (5.0, 25.0),
@@ -287,10 +292,15 @@ def main():
     label = "%s %d" % (M["th_full"], M["be_year"])
 
     print("เขียนบทวิเคราะห์ด้วย %s (effort=%s) · %d เพจ" % (MODEL, EFFORT, len(brands)), flush=True)
+    # Streamed, because one page of commentary per brand runs long: adaptive
+    # thinking at this effort is billed as output too, and eight pages already
+    # took 15.4k of the 16k this used to allow — the JSON then came back cut in
+    # half and unparseable. Streaming is what lets max_tokens go this high
+    # without the request timing out.
     try:
-        resp = client().messages.create(
+        with client().messages.stream(
             model=MODEL,
-            max_tokens=16000,
+            max_tokens=MAX_TOKENS,
             system=SYSTEM,
             thinking={"type": "adaptive"},
             output_config={"effort": EFFORT,
@@ -298,7 +308,8 @@ def main():
             messages=[{"role": "user", "content":
                        "เขียนบทวิเคราะห์ของทุกเพจต่อไปนี้ ใช้ค่า key ตามที่ให้มาเป๊ะ ๆ\n\n"
                        + brief(P, label)}],
-        )
+        ) as stream:
+            resp = stream.get_final_message()
     except Exception as exc:
         # Commentary is a bonus; a failed call must not lose the month's data.
         print("เขียนบทวิเคราะห์ไม่สำเร็จ — %s" % str(exc)[:200], flush=True)
@@ -308,11 +319,22 @@ def main():
         print("โมเดลปฏิเสธคำขอ — %s" % getattr(resp.stop_details, "explanation", ""), flush=True)
         return save(P, None)
 
+    # Say it plainly when the answer was cut off. Truncated JSON used to be
+    # reported as "unreadable JSON", which sent the reader looking for a bug in
+    # the schema instead of at the token ceiling.
+    if resp.stop_reason == "max_tokens":
+        print("คำตอบถูกตัดกลางทางเพราะชนเพดาน max_tokens (%d) — ใช้ output ไป %d token "
+              "ลองลด effort หรือเพิ่มเพดาน"
+              % (MAX_TOKENS, getattr(resp.usage, "output_tokens", 0)), flush=True)
+        return save(P, None)
+
     text = next((b.text for b in resp.content if b.type == "text"), "")
     try:
         out = json.loads(text)
     except Exception:
-        print("อ่านผลลัพธ์เป็น JSON ไม่ได้ — ข้ามบทวิเคราะห์", flush=True)
+        print("อ่านผลลัพธ์เป็น JSON ไม่ได้ — ข้ามบทวิเคราะห์ (stop_reason=%s · output %d token · "
+              "ความยาวข้อความ %d ตัวอักษร)"
+              % (resp.stop_reason, getattr(resp.usage, "output_tokens", 0), len(text)), flush=True)
         return save(P, None)
 
     known = {b["key"] for b in brands}
