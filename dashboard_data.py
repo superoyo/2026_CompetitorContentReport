@@ -7,6 +7,7 @@ needs — including the images, inlined as data URIs — ends up inside the
 returned dict, which is what gets saved.
 """
 import base64
+import datetime
 import json
 import os
 
@@ -41,7 +42,7 @@ def blank(month, group_id, brands):
         "mo": [{"key": b["key"], "name": b["name"], "color": b["color"], "logo": "",
                 "handle": (b.get("url", "").rstrip("/").rsplit("/", 1)[-1] or "").lower(),
                 "posts": 0, "likes": 0, "comments": 0, "shares": 0, "total": 0,
-                "avg": 0, "fans": None, "fans_prev": None, "growth": None,
+                "avg": 0, "fans": None, "fans_at": "", "fans_prev": None, "growth": None,
                 "er": None, "ppi": None,
                 "best_format": "—", "best_dow": "—"} for b in brands],
         "mo_max": {c: 0 for c in ("posts", "likes", "comments", "shares", "total", "avg")},
@@ -52,7 +53,7 @@ def blank(month, group_id, brands):
         "all": {k: [] for k in keys},
         "metrics": metrics,
         "ai": {}, "summary": {}, "keylearning": {},
-        "stats_error": "", "has_prev_fans": False,
+        "stats_error": "", "has_prev_fans": False, "growth_note": "",
         "grand_total": 0, "total_posts": 0,
     }
 
@@ -64,31 +65,61 @@ def _page_stats():
         with open(path, encoding='utf-8') as f:
             blob = json.load(f)
     except Exception:
-        return {}, ''
-    return (blob.get('pages') or {}), (blob.get('error') or '')
+        return {}, '', ''
+    return ((blob.get('pages') or {}), (blob.get('error') or ''),
+            (blob.get('fetched_at') or ''))
+
+
+# Two follower readings taken this close together cannot describe a month of
+# growth — it means an older month was re-fetched, and the reading recorded
+# under its name is really from today.
+MIN_GROWTH_GAP_DAYS = 20
+
+
+def _far_enough(before_at, now_at):
+    """True when two follower readings are a month-ish apart, or undatable."""
+    if not before_at or not now_at:
+        return True                      # nothing to judge on; trust the months
+    try:
+        a = datetime.date.fromisoformat(before_at)
+        b = datetime.date.fromisoformat(now_at)
+    except ValueError:
+        return True
+    return abs((b - a).days) >= MIN_GROWTH_GAP_DAYS
 
 
 def _previous_fans(group_id, month):
-    """Follower counts from the month before, for the growth column.
+    """Last month's follower counts, plus why they are unusable if they are.
 
-    Read from the report already stored for that month, so the first month of
-    a group simply has no baseline and the column stays blank rather than
-    inventing a change.
+    Read from the report already stored for that month. Facebook does not
+    publish past follower counts, so a month fetched before this pipeline
+    started recording them can never be filled in — better to say so than to
+    show a change that was never measured.
+
+    Returns (fans by key, reading date by key, reason the column is blank).
     """
+    prev = month_util.prev_iso(month)
     try:
         import store
         if not store.available():
-            return {}
-        saved = store.load_report(group_id, month_util.prev_iso(month))
+            return {}, {}, 'เซิร์ฟเวอร์ยังต่อฐานข้อมูลไม่ได้ จึงไม่มีเดือนก่อนให้เทียบ'
+        saved = store.load_report(group_id, prev)
     except Exception:
-        return {}
+        return {}, {}, 'อ่านรายงานเดือนก่อนจากฐานข้อมูลไม่ได้'
     if not saved:
-        return {}
-    out = {}
-    for row in ((saved.get('payload') or {}).get('mo') or []):
+        return {}, {}, 'ยังไม่เคยดึงข้อมูลเดือน %s จึงไม่มีฐานเทียบ' % prev
+    rows = (saved.get('payload') or {}).get('mo') or []
+    fans, at = {}, {}
+    fallback = str(saved.get('updated_at') or '')[:10]
+    for row in rows:
         if row.get('fans'):
-            out[row.get('key')] = row['fans']
-    return out
+            fans[row.get('key')] = row['fans']
+            at[row.get('key')] = row.get('fans_at') or fallback
+    if not fans:
+        return {}, {}, ('รายงานเดือน %s ถูกดึงก่อนที่ระบบจะเริ่มเก็บจำนวนผู้ติดตาม '
+                        'จึงไม่มีตัวเลขให้เทียบ — Facebook ไม่เปิดเผยยอดย้อนหลัง '
+                        'คอลัมน์นี้จะเริ่มมีค่าเมื่อดึงเดือนถัดไป' % prev)
+    return fans, at, ''
 
 
 def _ppi(rows):
@@ -217,15 +248,19 @@ def build():
     mo_cols = ['posts', 'likes', 'comments', 'shares', 'total', 'avg']
     mo_max = {c: max(AGG[k][c] for k in AGG) for c in mo_cols}
 
-    STATS, stats_error = _page_stats()
+    STATS, stats_error, fans_at = _page_stats()
     group_id = P.get('group_id', '')
-    PREV = _previous_fans(group_id, M['iso'])
+    PREV, PREV_AT, growth_note = _previous_fans(group_id, M['iso'])
 
     metrics_overview = []
+    too_close = False
     for k in sorted(AGG, key=lambda x: AGG[x]['total'], reverse=True):
         a = AGG[k]; m = MET[k]
         fans = (STATS.get(k) or {}).get('followers')
         before = PREV.get(k)
+        if before and not _far_enough(PREV_AT.get(k), fans_at):
+            before = None
+            too_close = True
         # Engagement rate the way the reference report states it: a page's
         # month of engagement measured against its audience, then spread over
         # the days in the month, so months of different length compare.
@@ -238,10 +273,15 @@ def build():
             'handle': (URL.get(k, '').rstrip('/').rsplit('/', 1)[-1] or '').lower(),
             'posts': a['posts'], 'likes': a['likes'], 'comments': a['comments'],
             'shares': a['shares'], 'total': a['total'], 'avg': round(a['avg']),
-            'fans': fans, 'fans_prev': before, 'growth': growth, 'er': er, 'ppi': None,
+            'fans': fans, 'fans_at': fans_at,
+            'fans_prev': before, 'growth': growth, 'er': er, 'ppi': None,
             'best_format': FMT_TH.get(m.get('best_format'), '—'),
             'best_dow': m.get('best_dow') or '—',
         })
+    if too_close and not growth_note:
+        growth_note = ('จำนวนผู้ติดตามของเดือนก่อนถูกอ่านห่างจากรอบนี้ไม่ถึง %d วัน '
+                       'ซึ่งเกิดจากการย้อนไปดึงเดือนเก่าทีหลัง ไม่ใช่การเติบโตจริงตลอดเดือน '
+                       'จึงไม่แสดงค่า' % MIN_GROWTH_GAP_DAYS)
     _ppi(metrics_overview)
 
     DATA = {
@@ -250,6 +290,7 @@ def build():
         # Why the follower columns are blank, when they are.
         'stats_error': stats_error,
         'has_prev_fans': bool(PREV),
+        'growth_note': growth_note,
         'agg': AGG, 'days': all_days, 'daily': daily_series, 'top5': top5_out,
         'all': all_out, 'metrics': MET,
         'ai': GEN.get('ai', ANALYSIS),

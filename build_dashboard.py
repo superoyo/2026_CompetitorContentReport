@@ -535,8 +535,10 @@ const fansFmt = n => {
   return fmt(n);
 };
 const growthCell = r => {
-  if(r.growth===null||r.growth===undefined)
-    return `<td class="num flat" title="${DATA.has_prev_fans?'ไม่พบจำนวนผู้ติดตามของเดือนก่อน':'ยังไม่มีข้อมูลเดือนก่อนให้เทียบ'}">—</td>`;
+  if(r.growth===null||r.growth===undefined){
+    const why = DATA.growth_note || 'ไม่พบจำนวนผู้ติดตามของเดือนก่อน';
+    return `<td class="num flat" title="${esc(why)}">—</td>`;
+  }
   const cls = r.growth>0?'up':(r.growth<0?'dn':'flat');
   return `<td class="num ${cls}">${r.growth>0?'+':''}${pct(r.growth)}</td>`;
 };
@@ -571,9 +573,10 @@ document.getElementById('moCard').innerHTML = `
     </tr>`).join('')}
     </tbody></table></div>
   ${DATA.stats_error?`<div class="mo-warn"><b>ผู้ติดตาม:</b> ${esc(DATA.stats_error)} — คอลัมน์ Followers, Follower Growth และ Engagement จึงว่างบางแถว</div>`:''}
+  ${DATA.growth_note?`<div class="mo-warn"><b>Follower Growth ว่าง:</b> ${esc(DATA.growth_note)}</div>`:''}
   <div class="mo-note">
     <b>Engagement</b> = Engagement รวมของเดือน ÷ จำนวนผู้ติดตาม ÷ จำนวนวันในเดือน (อัตราต่อวัน) &middot;
-    <b>Follower Growth</b> = เทียบกับจำนวนผู้ติดตามที่บันทึกไว้เมื่อเดือนก่อน — เดือนแรกของชุดแบรนด์จะยังว่างเพราะไม่มีฐานเทียบ &middot;
+    <b>Follower Growth</b> = เทียบกับจำนวนผู้ติดตามที่บันทึกไว้ตอนดึงข้อมูลเดือนก่อน จึงต้องมีเดือนก่อนที่ดึงไว้แล้วอย่างน้อยหนึ่งเดือน (Facebook ไม่เปิดเผยยอดผู้ติดตามย้อนหลัง จะย้อนไปเก็บทีหลังไม่ได้) &middot;
     <b>Page Performance Index</b> เป็นคะแนนรวมที่เราคิดขึ้นเอง (0.55 × อัตรา Engagement + 0.25 × การเติบโตผู้ติดตาม + 0.20 × จำนวนโพสต์ เทียบช่วงภายในกลุ่ม)
     <u>ไม่ใช่สูตรเดียวกับ Page Performance Index ของ Rival IQ</u> ซึ่งไม่เคยเปิดเผยวิธีคำนวณ &middot;
     ผู้ติดตามดึงจาก Apify actor <code>facebook-pages-scraper</code> ณ วันที่ดึงข้อมูล ไม่ใช่ค่าเฉลี่ยของเดือน

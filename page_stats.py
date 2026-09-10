@@ -16,6 +16,7 @@ Writes {"pages": {key: {followers, likes, field}}} to $PAGE_STATS_JSON.
 A failure here must not cost the whole run: the file is still written, with
 an "error", and the dashboard shows a dash in those columns.
 """
+import datetime
 import json
 import os
 import sys
@@ -148,7 +149,10 @@ def main():
         print("  %-24s followers=%s (field %s)" % (b["key"], pages[b["key"]]["followers"],
                                                    pages[b["key"]]["field"]), flush=True)
 
-    out = {"pages": pages, "items": len(items) if isinstance(items, list) else 0}
+    out = {"pages": pages, "items": len(items) if isinstance(items, list) else 0,
+           # Follower counts are a reading taken now, not a monthly average.
+           # Growth needs to know how far apart two readings really are.
+           "fetched_at": datetime.date.today().isoformat()}
     if missing:
         out["error"] = "ไม่พบจำนวนผู้ติดตามของ: " + ", ".join(missing)
         print("WARN", out["error"], flush=True)
