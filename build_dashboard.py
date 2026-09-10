@@ -326,6 +326,25 @@ HTML = r'''<!DOCTYPE html>
     align-items:center;gap:7px;box-shadow:var(--shadow);white-space:nowrap;transition:.15s}
   .an-btn:hover:not(:disabled){background:#EADFF8;border-color:#6B3FA0;transform:translateY(-1px)}
   .an-btn:disabled{opacity:.55;cursor:progress;transform:none}
+  /* per-brand summary, bottom of the page */
+  .bs-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(268px,1fr));gap:15px;margin-top:17px}
+  .bs{background:var(--panel2);border:1px solid var(--line);border-radius:14px;padding:15px 16px 13px}
+  .bs-head{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+  .bs-head img{width:34px;height:34px;border-radius:50%;object-fit:cover;flex:none;background:#fff}
+  .bs-badge{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;color:#fff;
+    font-weight:800;font-family:var(--head);flex:none}
+  .bs-head .nm{font-family:var(--head);font-weight:800;font-size:13.5px;color:#1B2430;line-height:1.25}
+  .bs-head .hd{font-size:10.5px;color:#8A94A2}
+  .bs-rows{display:flex;flex-direction:column;gap:0}
+  .bs-r{display:flex;justify-content:space-between;align-items:baseline;gap:10px;
+    padding:6px 0;border-bottom:1px dashed var(--line);font-size:12px}
+  .bs-r:last-child{border-bottom:none}
+  .bs-r .k{color:#7A8694}
+  .bs-r .v{font-family:var(--head);font-weight:800;color:#1B2430;text-align:right}
+  .bs-sep{height:1px;background:var(--line);margin:9px 0 4px}
+  .bs-mix{display:flex;flex-wrap:wrap;gap:5px;margin-top:9px}
+  .bs-chip{background:var(--panel);border:1px solid var(--line);border-radius:999px;
+    padding:3px 9px;font-size:10.5px;color:#5A6675;font-weight:600}
   .mo th.er,.mo td.er{background:#F0F7FF}
   .mo td.er{font-weight:800;color:#0B2545}
   .mo td.ppi{font-weight:800}
@@ -455,6 +474,12 @@ HTML = r'''<!DOCTYPE html>
 
   <div id="klWrap"></div>
 
+  <div class="card brand-sum">
+    <h2>สรุปรายเพจ — __M_TH__ __M_BE__</h2>
+    <div class="hint">ตัวเลขรวมของแต่ละเพจในเดือนนี้ พร้อมฟอร์แมตที่ได้ Engagement เฉลี่ยสูงสุด, วันที่โพสต์แล้วเวิร์กที่สุด และสัดส่วนคอนเทนต์ที่ลงจริง</div>
+    <div class="bs-grid" id="bsGrid"></div>
+  </div>
+
   <div class="foot-note">
     <b>หมายเหตุ:</b> ข้อมูลดึงจากโพสต์สาธารณะบนเพจ Facebook ผ่านเครื่องมือสแครปข้อมูล (Apify) ไม่ใช่ตัวเลขจาก Facebook Page Insights โดยตรง &middot;
     Engagement = Likes/Reactions + Comments + Shares ไม่รวม Reach / Impressions / Click &middot;
@@ -492,6 +517,8 @@ const pct = v => {
   const d=Math.min(6, Math.max(0, 1-Math.floor(Math.log10(a))));
   return v.toFixed(d)+'%';
 };
+/* Media-type icons, shared by the contact sheet and the per-brand summary. */
+const MTI = {photo:'🖼️',video:'📹',text:'📝',link:'🔗',other:'📄'};
 const fansFmt = n => {
   if(n===null||n===undefined) return '—';
   if(n>=1e6) return (n/1e6).toFixed(n>=1e7?0:1)+'M';
@@ -571,6 +598,34 @@ new Chart(document.getElementById('barChart'),{
       y:{ticks:{color:'#7C8797',callback:v=>fmt(v)},grid:{color:'#EAEDF2'}}}}
 });
 
+/* Per-brand summary. Holds what the Metrics Overview table stopped showing
+   when it moved to the reference report's columns: engagement totals, the
+   per-post average, the format that performed best and the best day. */
+const FMT_LBL = {photo:'รูปภาพ', video:'วิดีโอ', text:'ข้อความ', link:'ลิงก์', other:'อื่นๆ'};
+document.getElementById('bsGrid').innerHTML = (DATA.mo||[]).map(r=>{
+  const m = (DATA.metrics||{})[r.key] || {};
+  const mix = m.media_mix || {};
+  const chips = Object.keys(mix).sort((a,b)=>mix[b]-mix[a]).map(t=>
+    `<span class="bs-chip">${MTI[t]||'📄'} ${FMT_LBL[t]||t} ${mix[t]}</span>`).join('');
+  const row = (k,v) => `<div class="bs-r"><span class="k">${k}</span><span class="v">${v}</span></div>`;
+  return `<div class="bs">
+    <div class="bs-head">
+      ${r.logo?`<img src="${r.logo}" alt="">`:`<div class="bs-badge" style="background:${r.color}">${r.name[0]}</div>`}
+      <div><div class="nm">${r.name}</div><div class="hd">@${r.handle||r.key.toLowerCase()}</div></div>
+    </div>
+    <div class="bs-rows">
+      ${row('Engagement รวม', `<span style="color:${r.color}">${fmt(r.total)}</span>`)}
+      ${row('เฉลี่ย/โพสต์', fmt(r.avg))}
+      ${row('จำนวนโพสต์', fmt(r.posts))}
+      ${row('ผู้ติดตาม', r.fans==null?'—':fansFmt(r.fans))}
+      <div class="bs-sep"></div>
+      ${row('ฟอร์แมตเด่น', r.best_format||'—')}
+      ${row('วันที่เวิร์ก', r.best_dow||'—')}
+    </div>
+    ${chips?`<div class="bs-mix">${chips}</div>`:''}
+  </div>`;
+}).join('');
+
 const tabsEl = document.getElementById('tabs');
 const postsEl = document.getElementById('posts');
 const aiEl = document.getElementById('aiBox');
@@ -630,7 +685,6 @@ function renderAI(key){
 // ---- All-content contact sheet (single box, all brands) ----
 const TH_MON = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
 const shortDate = t => { if(!t) return ''; const [y,m,d]=t.split('-'); return parseInt(d,10)+' '+(TH_MON[parseInt(m,10)-1]||''); };
-const MTI = {photo:'🖼️',video:'📹',text:'📝',link:'🔗',other:'📄'};
 document.getElementById('allGrid').innerHTML = order.map(b=>{
   const posts = DATA.all[b.key]||[];
   const tiles = posts.map(p=>{
