@@ -331,6 +331,16 @@ HTML = r'''<!DOCTYPE html>
     align-items:center;gap:7px;box-shadow:var(--shadow);white-space:nowrap;transition:.15s}
   .an-btn:hover:not(:disabled){background:#EADFF8;border-color:#6B3FA0;transform:translateY(-1px)}
   .an-btn:disabled{opacity:.55;cursor:progress;transform:none}
+  .mo th.er,.mo td.er{background:#F0F7FF}
+  .mo td.er{font-weight:800;color:#0B2545}
+  .mo td.ppi{font-weight:800}
+  .mo .up{color:#0B7B57}
+  .mo .dn{color:#C2410C}
+  .mo .flat{color:#9AA5B1}
+  .mo-note{font-size:11px;color:#7A8694;margin-top:11px;line-height:1.65}
+  .mo-note b{color:#5A6675}
+  .mo-warn{background:#FFF6E5;border:1px solid #F6E2BE;border-radius:9px;padding:8px 11px;
+    font-size:11.5px;color:#7A5A22;margin-top:10px}
   .pt-btn{font-family:var(--head);font-size:13px;font-weight:700;color:#0B7B57;background:#E8F7F0;
     border:1px solid #BEE9D8;padding:10px 16px;border-radius:999px;cursor:pointer;display:flex;
     align-items:center;gap:7px;box-shadow:var(--shadow);white-space:nowrap;transition:.15s;text-decoration:none}
@@ -509,29 +519,65 @@ const topBrand = order[0] || {key:'', name:'—', color:'#8A94A2'};
 // Metrics Overview table — derived entirely from the scraped May posts
 const mo = DATA.mo, mmax = DATA.mo_max;
 const moCell = (v,disp,col)=>`<td class="num ${v===mmax[col]?'hi':''}">${disp}</td>`;
+/* Percentages are shown to two significant digits, so a 0.0015% page reads
+   as precisely as a 0.89% one instead of rounding away to 0.00%. */
+const pct = v => {
+  if(v===null||v===undefined) return '—';
+  const a=Math.abs(v);
+  if(!a) return '0%';
+  const d=Math.min(6, Math.max(0, 1-Math.floor(Math.log10(a))));
+  return v.toFixed(d)+'%';
+};
+const fansFmt = n => {
+  if(n===null||n===undefined) return '—';
+  if(n>=1e6) return (n/1e6).toFixed(n>=1e7?0:1)+'M';
+  if(n>=1e3) return Math.round(n/1e3)+'k';
+  return fmt(n);
+};
+const growthCell = r => {
+  if(r.growth===null||r.growth===undefined)
+    return `<td class="num flat" title="${DATA.has_prev_fans?'ไม่พบจำนวนผู้ติดตามของเดือนก่อน':'ยังไม่มีข้อมูลเดือนก่อนให้เทียบ'}">—</td>`;
+  const cls = r.growth>0?'up':(r.growth<0?'dn':'flat');
+  return `<td class="num ${cls}">${r.growth>0?'+':''}${pct(r.growth)}</td>`;
+};
+
 document.getElementById('moCard').innerHTML = `
   <h2>Metrics Overview</h2>
-  <div class="hint">ภาพรวมทุกเพจจากโพสต์จริงในเดือน__M_TH__ — จำนวนโพสต์, Reactions, Comments, Shares, Engagement รวม/เฉลี่ย และฟอร์แมตที่เวิร์กที่สุด (ตัวหนา = สูงสุดในคอลัมน์)</div>
+  <div class="hint">ภาพรวมทุกเพจในเดือน__M_TH__ — คะแนนรวม, ผู้ติดตามและการเติบโต, จำนวนโพสต์, Reactions, Comments, Shares และอัตรา Engagement (ตัวหนา = สูงสุดในคอลัมน์)</div>
   <div class="mo-scroll"><table class="mo">
     <thead><tr>
-      <th class="l">Name</th><th>โพสต์</th><th>Reactions<br>(ไลก์)</th><th>Comments</th>
-      <th>Shares</th><th>Engagement<br>รวม</th><th>เฉลี่ย<br>/โพสต์</th>
-      <th class="c">ฟอร์แมต<br>เด่น</th><th class="c">วัน<br>เวิร์ก</th>
+      <th class="l">Name</th>
+      <th>Page Performance<br>Index</th>
+      <th>Followers</th>
+      <th>Follower<br>Growth</th>
+      <th>Number<br>of posts</th>
+      <th>Number of<br>Reactions</th>
+      <th>Number of<br>comments</th>
+      <th>Number of<br>Shares</th>
+      <th class="er">Engagement</th>
     </tr></thead><tbody>
     ${mo.map(r=>`<tr>
       <td class="l"><div class="mo-name">
         ${r.logo?`<img src="${r.logo}" alt="">`:`<div class="mo-badge" style="background:${r.color}">${r.name[0]}</div>`}
-        <div><div class="nm">${r.name}</div><div class="hd">@${r.key.toLowerCase()}</div></div></div></td>
+        <div><div class="nm">${r.name}</div><div class="hd">@${r.handle||r.key.toLowerCase()}</div></div></div></td>
+      <td class="num ppi" style="color:${r.color}">${r.ppi===null||r.ppi===undefined?'—':r.ppi+'%'}</td>
+      <td class="num">${fansFmt(r.fans)}</td>
+      ${growthCell(r)}
       ${moCell(r.posts, fmt(r.posts), 'posts')}
       ${moCell(r.likes, fmt(r.likes), 'likes')}
       ${moCell(r.comments, fmt(r.comments), 'comments')}
       ${moCell(r.shares, fmt(r.shares), 'shares')}
-      <td class="num ${r.total===mmax.total?'hi':''}" style="color:${r.total===mmax.total?'#1A2333':r.color};font-weight:800">${fmt(r.total)}</td>
-      ${moCell(r.avg, fmt(r.avg), 'avg')}
-      <td class="c">${r.best_format}</td>
-      <td class="c">${r.best_dow}</td>
+      <td class="num er" title="Engagement รวม ${fmt(r.total)}">${pct(r.er)}</td>
     </tr>`).join('')}
-    </tbody></table></div>`;
+    </tbody></table></div>
+  ${DATA.stats_error?`<div class="mo-warn"><b>ผู้ติดตาม:</b> ${esc(DATA.stats_error)} — คอลัมน์ Followers, Follower Growth และ Engagement จึงว่างบางแถว</div>`:''}
+  <div class="mo-note">
+    <b>Engagement</b> = Engagement รวมของเดือน ÷ จำนวนผู้ติดตาม ÷ จำนวนวันในเดือน (อัตราต่อวัน) &middot;
+    <b>Follower Growth</b> = เทียบกับจำนวนผู้ติดตามที่บันทึกไว้เมื่อเดือนก่อน — เดือนแรกของชุดแบรนด์จะยังว่างเพราะไม่มีฐานเทียบ &middot;
+    <b>Page Performance Index</b> เป็นคะแนนรวมที่เราคิดขึ้นเอง (0.55 × อัตรา Engagement + 0.25 × การเติบโตผู้ติดตาม + 0.20 × จำนวนโพสต์ เทียบช่วงภายในกลุ่ม)
+    <u>ไม่ใช่สูตรเดียวกับ Page Performance Index ของ Rival IQ</u> ซึ่งไม่เคยเปิดเผยวิธีคำนวณ &middot;
+    ผู้ติดตามดึงจาก Apify actor <code>facebook-pages-scraper</code> ณ วันที่ดึงข้อมูล ไม่ใช่ค่าเฉลี่ยของเดือน
+  </div>`;
 
 /* Before a month is fetched every total is zero, so guard the two tiles that
    would otherwise read NaN or name a "top" page out of an all-zero table. */
@@ -1307,18 +1353,22 @@ window.FBDASH = {group:'', months:{}, brands:[], ready:false};
            ['GOLD',0.002,0.0006],['PLATINUM',0.0016,0.0004],['DIAMOND',0.0008,0.0002]];
     /* keep sub-cent rows readable: $0.001 must not render as $0.00 */
     function money(v){return '$'+(v<0.01 ? v.toFixed(3) : v.toFixed(2));}
-    var free=T[0], freeTotal=START+N*free[1]+N*free[2];
+    var free=T[0];
 
+    /* A second actor (facebook-pages-scraper) supplies the follower counts. */
+    var PAGE_FEE=0.012, NP=(DATA.mo||[]).length;
     var brk='<table class="cost-t"><thead><tr><th>รายการ</th><th>สูตร</th><th>ราคา</th></tr></thead><tbody>'
       +'<tr><td>เริ่มรัน actor</td><td><code>คิดครั้งเดียว</code></td><td>'+money(START)+'</td></tr>'
       +'<tr><td>โพสต์ที่ดึงได้</td><td><code>'+N+' × $'+free[1].toFixed(4)+'</code></td><td>'+money(N*free[1])+'</td></tr>'
       +'<tr><td>ตัวกรองช่วงวันที่</td><td><code>'+N+' × $'+free[2].toFixed(4)+'</code></td><td>'+money(N*free[2])+'</td></tr>'
+      +'<tr><td>ดึงจำนวนผู้ติดตาม</td><td><code>'+NP+' เพจ × $'+PAGE_FEE.toFixed(3)+'</code></td><td>'+money(NP*PAGE_FEE)+'</td></tr>'
       +'</tbody></table>';
 
+    var freeTotal=START+N*free[1]+N*free[2]+NP*PAGE_FEE;
     var tiers='<table class="cost-t"><thead><tr><th>แผน Apify</th><th>ต่อโพสต์</th>'
       +'<th>ต่อครั้ง ('+N+' โพสต์)</th><th>ถ้าเดือนละครั้ง (ต่อปี)</th></tr></thead><tbody>';
     for(var i=0;i<T.length;i++){
-      var t=T[i], per=START+N*t[1]+N*t[2];
+      var t=T[i], per=START+N*t[1]+N*t[2]+NP*PAGE_FEE;
       tiers+='<tr'+(i===0?' class="mine"':'')+'><td>'+t[0]+(i===0?' (ค่าเริ่มต้น)':'')+'</td>'
         +'<td><code>$'+(t[1]+t[2]).toFixed(4)+'</code></td><td>'+money(per)+'</td>'
         +'<td>'+money(per*12)+'</td></tr>';

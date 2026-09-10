@@ -37,6 +37,12 @@ def parse(value):
     return year, month
 
 
+def prev_iso(iso):
+    """The month before `iso`, e.g. 2026-08 -> 2026-07. Used for growth."""
+    year, month = parse(iso)
+    return "%04d-%02d" % (year - 1, 12) if month == 1 else "%04d-%02d" % (year, month - 1)
+
+
 def info(value=None):
     """Return every label and boundary derived from the report month."""
     iso = value or os.environ.get("REPORT_MONTH", "").strip() or default_month()

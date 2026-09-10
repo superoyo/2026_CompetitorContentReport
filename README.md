@@ -239,6 +239,7 @@ endpoint ตรวจว่าข้อมูลบนเซิร์ฟเว�
 | Event | FREE | DIAMOND |
 |---|---|---|
 | `actor-start` | $0.001 | $0.001 |
+| ดึงผู้ติดตาม (ต่อเพจ) | $0.012 | $0.002 |
 | `post` (ต่อโพสต์) | $0.005 | $0.0008 |
 | `filter-applied` (ต่อโพสต์) | $0.002 | $0.0002 |
 
@@ -255,6 +256,31 @@ endpoint ตรวจว่าข้อมูลบนเซิร์ฟเว�
 
 โพสต์ที่ไม่มีรูป (status/text post) จะแสดงแคปชั่นในกล่องแทนช่องว่าง
 ทั้งใน contact sheet, การ์ด Top 5 และสไลด์ PPTX
+
+## Metrics Overview
+
+ตารางหลักมี 9 คอลัมน์: Name, Page Performance Index, Followers, Follower Growth,
+Number of posts / Reactions / comments / Shares และ Engagement
+
+| คอลัมน์ | ที่มา |
+|---|---|
+| posts / Reactions / comments / Shares | นับจากโพสต์ที่ scrape มาได้ |
+| Followers | `page_stats.py` ผ่าน actor `apify/facebook-pages-scraper` |
+| Follower Growth | เทียบกับ `fans` ในรายงานเดือนก่อนที่เก็บใน Postgres |
+| Engagement | `engagement รวม ÷ followers ÷ จำนวนวันในเดือน` (อัตราต่อวัน) |
+| Page Performance Index | คะแนนรวมที่เราคิดเอง — ดูด้านล่าง |
+
+**Page Performance Index ไม่ใช่สูตรของ Rival IQ** ซึ่งไม่เคยเปิดเผยวิธีคำนวณ
+ของเราคือ `0.55 × อัตรา Engagement + 0.25 × การเติบโตผู้ติดตาม + 0.20 × จำนวนโพสต์`
+โดยแต่ละตัวถูก scale เทียบช่วงค่าภายในกลุ่มแบรนด์นั้น แล้วแสดงเป็น 0–100
+สูตรเขียนกำกับไว้ใต้ตารางบนหน้าเว็บด้วย เปลี่ยนได้ที่ `dashboard_data._ppi()`
+
+เปอร์เซ็นต์แสดงเป็นเลขนัยสำคัญ 2 ตัว (`0.89%`, `0.092%`, `0.0015%`) เพื่อให้เพจที่
+อัตราต่ำมากยังอ่านค่าได้ ไม่ถูกปัดเป็น `0.00%`
+
+**เดือนแรกของชุดแบรนด์จะยังไม่มี Follower Growth** เพราะไม่มีเดือนก่อนให้เทียบ
+และถ้าดึงผู้ติดตามไม่สำเร็จ คอลัมน์ Followers / Growth / Engagement จะว่าง
+พร้อมข้อความอธิบายเหนือตาราง แทนที่จะเดาตัวเลข
 
 ## Output
 

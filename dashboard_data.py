@@ -39,8 +39,11 @@ def blank(month, group_id, brands):
         "brands": [{"key": b["key"], "name": b["name"], "letter": b["letter"],
                     "color": b["color"]} for b in brands],
         "mo": [{"key": b["key"], "name": b["name"], "color": b["color"], "logo": "",
+                "handle": (b.get("url", "").rstrip("/").rsplit("/", 1)[-1] or "").lower(),
                 "posts": 0, "likes": 0, "comments": 0, "shares": 0, "total": 0,
-                "avg": 0, "best_format": "—", "best_dow": "—"} for b in brands],
+                "avg": 0, "fans": None, "fans_prev": None, "growth": None,
+                "er": None, "ppi": None,
+                "best_format": "—", "best_dow": "—"} for b in brands],
         "mo_max": {c: 0 for c in ("posts", "likes", "comments", "shares", "total", "avg")},
         "agg": agg,
         "days": ["%s-%02d" % (info["iso"], d) for d in range(1, info["days"] + 1)],
@@ -49,8 +52,75 @@ def blank(month, group_id, brands):
         "all": {k: [] for k in keys},
         "metrics": metrics,
         "ai": {}, "summary": {}, "keylearning": {},
+        "stats_error": "", "has_prev_fans": False,
         "grand_total": 0, "total_posts": 0,
     }
+
+
+def _page_stats():
+    """Follower counts written by page_stats.py, or {} when it could not."""
+    path = os.environ.get('PAGE_STATS_JSON', '/tmp/page_stats.json')
+    try:
+        with open(path, encoding='utf-8') as f:
+            blob = json.load(f)
+    except Exception:
+        return {}, ''
+    return (blob.get('pages') or {}), (blob.get('error') or '')
+
+
+def _previous_fans(group_id, month):
+    """Follower counts from the month before, for the growth column.
+
+    Read from the report already stored for that month, so the first month of
+    a group simply has no baseline and the column stays blank rather than
+    inventing a change.
+    """
+    try:
+        import store
+        if not store.available():
+            return {}
+        saved = store.load_report(group_id, month_util.prev_iso(month))
+    except Exception:
+        return {}
+    if not saved:
+        return {}
+    out = {}
+    for row in ((saved.get('payload') or {}).get('mo') or []):
+        if row.get('fans'):
+            out[row.get('key')] = row['fans']
+    return out
+
+
+def _ppi(rows):
+    """A 0-100 standing for each page within this group.
+
+    Our own composite, not Rival IQ's Page Performance Index, whose formula
+    has never been published: engagement rate carries most of it, follower
+    growth and posting volume the rest, each scaled against the range the
+    group actually spans. Left as None when engagement rate is unknown,
+    because without followers there is nothing to weigh.
+
+        0.55 x engagement rate  +  0.25 x follower growth  +  0.20 x posts
+    """
+    usable = [r for r in rows if r.get('er') is not None]
+    if not usable:
+        return
+    def scale(field, floor_at_zero=False):
+        vals = []
+        for r in usable:
+            v = r.get(field)
+            v = 0.0 if v is None else float(v)
+            if floor_at_zero and v < 0:
+                v = 0.0
+            vals.append(v)
+        lo, hi = min(vals), max(vals)
+        span = hi - lo
+        return {id(r): (0.5 if span == 0 else (v - lo) / span)
+                for r, v in zip(usable, vals)}
+    er, gro, vol = scale('er'), scale('growth', True), scale('posts')
+    for r in usable:
+        r['ppi'] = round(100 * (0.55 * er[id(r)] + 0.25 * gro[id(r)] + 0.20 * vol[id(r)]))
+
 
 
 def build():
@@ -146,22 +216,40 @@ def build():
     FMT_TH = {'video': '📹 วิดีโอ', 'photo': '🖼️ รูปภาพ', 'text': '📝 ข้อความ', 'other': '📄 อื่นๆ', None: '—'}
     mo_cols = ['posts', 'likes', 'comments', 'shares', 'total', 'avg']
     mo_max = {c: max(AGG[k][c] for k in AGG) for c in mo_cols}
+
+    STATS, stats_error = _page_stats()
+    group_id = P.get('group_id', '')
+    PREV = _previous_fans(group_id, M['iso'])
+
     metrics_overview = []
     for k in sorted(AGG, key=lambda x: AGG[x]['total'], reverse=True):
         a = AGG[k]; m = MET[k]
+        fans = (STATS.get(k) or {}).get('followers')
+        before = PREV.get(k)
+        # Engagement rate the way the reference report states it: a page's
+        # month of engagement measured against its audience, then spread over
+        # the days in the month, so months of different length compare.
+        er = (100.0 * a['total'] / fans / M['days']) if fans else None
+        growth = (100.0 * (fans - before) / before) if (fans and before) else None
         metrics_overview.append({
             'key': k, 'name': NAME[k],
             'color': COLOR.get(k, '#64748B'),
             'logo': logo_b64(k),
+            'handle': (URL.get(k, '').rstrip('/').rsplit('/', 1)[-1] or '').lower(),
             'posts': a['posts'], 'likes': a['likes'], 'comments': a['comments'],
             'shares': a['shares'], 'total': a['total'], 'avg': round(a['avg']),
+            'fans': fans, 'fans_prev': before, 'growth': growth, 'er': er, 'ppi': None,
             'best_format': FMT_TH.get(m.get('best_format'), '—'),
             'best_dow': m.get('best_dow') or '—',
         })
+    _ppi(metrics_overview)
 
     DATA = {
         'brands': [{'key': b['key'], 'name': b['name'], 'letter': b['letter'], 'color': b['color']} for b in BRANDS],
         'mo': metrics_overview, 'mo_max': mo_max,
+        # Why the follower columns are blank, when they are.
+        'stats_error': stats_error,
+        'has_prev_fans': bool(PREV),
         'agg': AGG, 'days': all_days, 'daily': daily_series, 'top5': top5_out,
         'all': all_out, 'metrics': MET,
         'ai': GEN.get('ai', ANALYSIS),

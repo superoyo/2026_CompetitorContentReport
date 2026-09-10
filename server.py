@@ -58,10 +58,12 @@ PAGE_CACHE = os.environ.get("PAGE_CACHE", "/tmp/ccr_pages")
 PROCESSED = os.environ.get("PROCESSED_JSON", "/tmp/processed_8.json")
 BRANDSET_FILE = os.environ.get("BRANDSET_JSON", "/tmp/ccr_brandset.json")
 DATA_FILE = "/tmp/ccr_dashboard_data.json"
+PAGE_STATS_FILE = "/tmp/page_stats.json"
 
 # The pipeline, in order. Each step inherits APIFY_TOKEN from this process.
 STEPS = [
     ("ดึงโพสต์จาก Apify", "scrape_apify.py"),
+    ("ดึงจำนวนผู้ติดตาม", "page_stats.py"),
     ("ประมวลผลและดาวน์โหลดรูป", "process.py"),
     ("ครอปรูปสัดส่วน 4:5", "crop.py"),
     ("เขียนบทวิเคราะห์", "analyse.py"),
@@ -288,6 +290,7 @@ def run_pipeline(group, month, brands):
     brandset.write(BRANDSET_FILE, group, brands)
     env = dict(os.environ, APIFY_TOKEN=APIFY_TOKEN, REPORT_MONTH=month,
                BRANDSET_JSON=BRANDSET_FILE, DASHBOARD_DATA_JSON=DATA_FILE,
+               PAGE_STATS_JSON=PAGE_STATS_FILE,
                PYTHONUNBUFFERED="1")
     env.pop("DASHBOARD_FROM_DATA", None)      # this run builds a payload, not renders one
     _log("=== %s · เดือน %s · %d แบรนด์ ===" % (group or "(ชุดเดิม)", month, len(brands)))
