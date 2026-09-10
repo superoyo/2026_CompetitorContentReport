@@ -29,6 +29,7 @@ Environment:
     ANALYSIS_EFFORT        low | medium | high | xhigh | max (default high)
 """
 import json
+import re
 import os
 import sys
 
@@ -76,8 +77,19 @@ SYSTEM = """คุณเป็นนักวางแผนกลยุทธ�
 - chips: ป้ายสั้น 3 อัน ขึ้นต้นด้วยอิโมจิ สรุปจุดเด่นที่สุดของเพจนั้นพร้อมตัวเลขจริง
 - analysis: 3 ย่อหน้า อธิบายว่าเดือนนี้เพจทำอะไร อะไรเวิร์ก และทำไม
 - reco: 3 ข้อ สิ่งที่ควรทำต่อเดือนถัดไป เจาะจงพอที่จะเอาไปทำได้จริง
-- top3: 3 บรรทัด บอกว่าคอนเทนต์เด่นสามอันดับแรกเกี่ยวกับอะไรและสื่อสารอะไร
-- overview: 2-3 ประโยค ภาพรวมความเคลื่อนไหวและความหลากหลายของคอนเทนต์ทั้งเดือน
+- top3: 3 บรรทัด อธิบายคอนเทนต์เด่นสามอันดับแรกว่า "เป็นคอนเทนต์อะไร สื่อสารอะไร
+  และพูดถึงสินค้าตัวไหน" อ่านจากแคปชั่นและฟอร์แมตของโพสต์นั้นเป็นหลัก
+  ห้ามใส่ตัวเลขใด ๆ ในส่วนนี้ — ไม่ต้องบอกยอด engagement, ไม่ต้องบอกยอดไลก์/
+  คอมเมนต์/แชร์, ไม่ต้องบอกวันที่ และไม่ต้องเขียนอันดับเป็นเลข
+  ถ้าแคปชั่นไม่ได้ระบุสินค้าชัดเจน ให้เขียนว่าเป็นคอนเทนต์ของแบรนด์โดยรวม
+  ห้ามเดาหรือแต่งชื่อสินค้าขึ้นมาเอง
+- overview: 2-3 ประโยค ภาพรวมของคอนเทนต์ทั้งเดือนว่า "เน้นคอนเทนต์แนวไหน
+  มีความหลากหลายมากน้อยเพียงใด และมีคอนเทนต์ประเภทไหนบ้าง"
+  ห้ามใส่จำนวนโพสต์และยอด engagement ในส่วนนี้ ให้บรรยายเชิงเนื้อหาแทน
+  เช่น เน้นวิดีโอสาธิตการใช้งานเป็นหลัก มีคอนเทนต์โปรโมชั่นสลับกับคอนเทนต์
+  ให้ความรู้ หรือคอนเทนต์ผูกกับเทศกาล
+  ใช้คำบอกปริมาณเชิงคุณภาพได้ เช่น "เป็นส่วนใหญ่" "มีประปราย" "แทบไม่มี"
+  แต่ห้ามแปลงกลับเป็นตัวเลข
 - keylearning: บทเรียนภาพรวม เขียนให้ "แบรนด์ที่เราดูแล" เท่านั้น มองข้ามทั้งกลุ่ม
   แล้วสรุปว่าแบรนด์เราควรเรียนรู้อะไรจากเดือนนี้"""
 
@@ -233,6 +245,29 @@ def ping():
         return False, "%s: %s" % (MODEL, msg[:400])
 
 
+# top3 and overview are meant to read as content description, with no metrics
+# in them. The prompt says so; this reports when a run ignored it, rather than
+# rewriting the sentence and risking mangling a product name.
+METRIC_PATTERNS = (
+    re.compile(r"\d{1,3}(?:,\d{3})+"),                     # 30,568
+    re.compile(r"\d{4,}"),                                  # 30568
+    re.compile(r"\d+\s*(?:โพสต์|คอมเมนต์|แชร์|ไลก์|ครั้ง)"),
+    re.compile(r"(?:engagement|reactions|comments|shares)\s*\S{0,4}\s*\d",
+               re.IGNORECASE),
+)
+
+
+def metric_free(label, key, texts):
+    """Warn about numbers that read as metrics in a content-only field."""
+    for t in texts:
+        for pat in METRIC_PATTERNS:
+            hit = pat.search(t or "")
+            if hit:
+                print("WARN %s/%s ยังมีตัวเลขเชิงเมตริก: %r"
+                      % (key, label, hit.group(0)), flush=True)
+                break
+
+
 def main():
     with open(PROCESSED, encoding="utf-8") as f:
         P = json.load(f)
@@ -291,6 +326,8 @@ def main():
         ai[k] = {"chips": row["chips"][:3], "analysis": row["analysis"][:3],
                  "reco": row["reco"][:3]}
         summary[k] = {"top3": row["top3"][:3], "overview": row["overview"]}
+        metric_free("top3", k, summary[k]["top3"])
+        metric_free("overview", k, [summary[k]["overview"]])
 
     kl = out.get("keylearning") or {}
     keylearning = {kl["key"]: {"title": kl["title"], "sub": kl["sub"], "points": kl["points"][:6]}} \
