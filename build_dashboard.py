@@ -327,9 +327,7 @@ HTML = r'''<!DOCTYPE html>
   .an-btn:hover:not(:disabled){background:#EADFF8;border-color:#6B3FA0;transform:translateY(-1px)}
   .an-btn:disabled{opacity:.55;cursor:progress;transform:none}
   /* competitor summary: ranked table beside the standing of our own page */
-  .cs-wrap{display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:18px;margin-top:16px;align-items:start}
-  @media(max-width:1080px){.cs-wrap{grid-template-columns:1fr}}
-  .cs-scroll{overflow-x:auto}
+  .cs-scroll{overflow-x:auto;margin-top:16px}
   .cs-cell{display:inline-flex;align-items:center;gap:6px;justify-content:flex-end}
   .medal{width:19px;height:19px;border-radius:50%;display:inline-grid;place-items:center;
     font-family:var(--head);font-size:10.5px;font-weight:800;color:#fff;flex:none;
@@ -339,7 +337,10 @@ HTML = r'''<!DOCTYPE html>
   .medal.m3{background:#DC2626}
   .mo tr.cs-me td{background:#F0FBF4}
   .mo tr.cs-me td:first-child{box-shadow:inset 3px 0 0 #16A34A}
-  .cs-side{background:var(--panel2);border:1px solid var(--line);border-radius:14px;padding:15px 16px}
+  .cs-side{background:var(--panel2);border:1px solid var(--line);border-radius:14px;
+    padding:16px 18px;margin-top:16px}
+  .cs-mgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(196px,1fr));
+    gap:0 22px;margin-bottom:2px}
   .cs-side h3{font-family:var(--head);font-size:13px;font-weight:800;color:#1B2430;margin-bottom:3px}
   .cs-who{font-size:11px;color:#7A8694;margin-bottom:12px}
   .cs-m{padding:7px 0;border-bottom:1px dashed var(--line)}
@@ -351,8 +352,10 @@ HTML = r'''<!DOCTYPE html>
   .cs-m .pl{color:#7A8694}
   .cs-note{margin-top:13px;padding-top:12px;border-top:1px solid var(--line)}
   .cs-note h4{font-family:var(--head);font-size:11.5px;font-weight:800;color:#0B7B57;margin-bottom:7px}
-  .cs-note ul{list-style:none;display:flex;flex-direction:column;gap:8px}
-  .cs-note li{font-size:12px;line-height:1.62;color:#42505F;padding-left:13px;position:relative}
+  .cs-note ul{list-style:none;columns:2;column-gap:28px}
+  @media(max-width:860px){.cs-note ul{columns:1}}
+  .cs-note li{font-size:12px;line-height:1.62;color:#42505F;padding-left:13px;position:relative;
+    break-inside:avoid;margin-bottom:10px}
   .cs-note li:before{content:'';position:absolute;left:0;top:6px;width:5px;height:5px;
     border-radius:50%;background:#0B7B57}
   .cs-empty{font-size:12px;color:#7A8694;line-height:1.6}
@@ -507,10 +510,8 @@ HTML = r'''<!DOCTYPE html>
   <div class="card comp-sum">
     <h2>SUMMARY COMPETITOR — __M_TH__ __M_BE__</h2>
     <div class="hint">อันดับของแต่ละเพจในทุกคอลัมน์ (เหรียญ = อันดับ 1–3 ของคอลัมน์นั้น เพจที่คะแนนเท่ากันได้อันดับเดียวกัน) พร้อมสรุปตำแหน่งของแบรนด์เราด้านขวา</div>
-    <div class="cs-wrap">
-      <div class="cs-scroll"><table class="mo cs" id="csTable"></table></div>
-      <aside class="cs-side" id="csSide"></aside>
-    </div>
+    <div class="cs-scroll"><table class="mo cs" id="csTable"></table></div>
+    <div class="cs-side" id="csSide"></div>
   </div>
 
   <div class="card brand-sum">
@@ -641,14 +642,17 @@ new Chart(document.getElementById('barChart'),{
    column's top three medalled, and our own page's standing spelled out beside
    it. The standing lines are computed; the commentary under them is what
    analyse.py wrote about this month. */
+/* `fmt` fills the table and stays bare — a column of numbers reads faster
+   without a unit repeated down every row. `unit` is for the panel beside it,
+   where each value sits in a sentence and wants naming. */
 const CS_COLS = [
   {f:'ppi',      th:'Page Performance<br>Index', lbl:'Page Performance Index', fmt:v=>v+'%'},
   {f:'fans',     th:'Followers',                 lbl:'Followers',              fmt:v=>fansFmt(v)},
   {f:'growth',   th:'Follower<br>Growth',        lbl:'Follower Growth',        fmt:v=>(v>0?'+':'')+pct(v)},
-  {f:'posts',    th:'Number<br>of posts',        lbl:'Number of posts',        fmt:v=>fmt(v)+' คอนเทนต์'},
+  {f:'posts',    th:'Number<br>of posts',        lbl:'Number of posts',        fmt:v=>fmt(v),   unit:' คอนเทนต์'},
   {f:'likes',    th:'Number of<br>Reactions',    lbl:'Number of Reactions',    fmt:v=>fmt(v)},
-  {f:'comments', th:'Number of<br>comments',     lbl:'Number of comments',     fmt:v=>fmt(v)+' คอมเมนต์'},
-  {f:'shares',   th:'Number of<br>Shares',       lbl:'Number of Shares',       fmt:v=>fmt(v)+' ครั้ง'},
+  {f:'comments', th:'Number of<br>comments',     lbl:'Number of comments',     fmt:v=>fmt(v),   unit:' คอมเมนต์'},
+  {f:'shares',   th:'Number of<br>Shares',       lbl:'Number of Shares',       fmt:v=>fmt(v),   unit:' ครั้ง'},
   {f:'er',       th:'Engagement',                lbl:'Engagement',             fmt:v=>pct(v)},
 ];
 
@@ -685,7 +689,7 @@ document.getElementById('csTable').innerHTML = `
     const v = me[c.f], rk = (me.rank||{})[c.f];
     const val = v==null
       ? '<span class="pl">ยังไม่มีข้อมูล</span>'
-      : `<b>${c.fmt(v)}</b>` + (rk?` <span class="pl">(อันดับ ${rk} จาก ${total})</span>`:'');
+      : `<b>${c.fmt(v)}${c.unit||''}</b>` + (rk?` <span class="pl">(อันดับ ${rk} จาก ${total})</span>`:'');
     return `<div class="cs-m"><div class="lbl">${c.lbl}</div>
       <div class="val">${esc(short)} ทำได้ ${val}</div></div>`;
   }).join('');
@@ -696,7 +700,7 @@ document.getElementById('csTable').innerHTML = `
     : `<div class="cs-note"><div class="cs-empty">ยังไม่มีบทวิเคราะห์ของเดือนนี้ — กดเขียนบทวิเคราะห์เพื่อสร้าง</div></div>`;
   side.innerHTML = `<h3>สรุปตำแหน่งของแบรนด์เรา</h3>
     <div class="cs-who">${esc(me.name)} · เทียบกับ ${total} เพจในกลุ่มนี้</div>
-    ${lines}${note}`;
+    <div class="cs-mgrid">${lines}</div>${note}`;
 })();
 
 /* Per-brand summary. Holds what the Metrics Overview table stopped showing
