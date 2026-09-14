@@ -99,29 +99,6 @@ HTML = r'''<!DOCTYPE html>
   .tab.active{color:#fff;border-color:transparent}
   .section-title{font-size:21px;font-weight:800;margin:10px 0 4px;font-family:var(--head);color:var(--txt)}
   .section-sub{color:var(--muted);font-size:13px;margin-bottom:18px}
-  .ai-box{position:relative;border-radius:18px;padding:1.5px;margin-bottom:22px;
-    background:linear-gradient(120deg,#8B5CF6,#3B82F6 40%,#06B6D4 75%,#F59E0B);
-    box-shadow:var(--shadow)}
-  .ai-inner{background:#FFFFFF;border-radius:16.5px;padding:22px 26px}
-  .ai-head{display:flex;align-items:center;gap:12px;margin-bottom:6px}
-  .ai-logo{width:40px;height:40px;border-radius:12px;display:grid;place-items:center;font-size:21px;
-    background:linear-gradient(135deg,#8B5CF6,#06B6D4);flex:none;box-shadow:0 4px 14px rgba(124,58,237,.25)}
-  .ai-head .t{font-size:18px;font-weight:800;letter-spacing:.2px;font-family:var(--head);color:var(--txt)}
-  .ai-head .t small{display:block;font-weight:500;color:var(--muted);font-size:11.5px;letter-spacing:.2px;margin-top:2px;font-family:var(--body)}
-  .ai-chips{display:flex;flex-wrap:wrap;gap:8px;margin:15px 0 20px}
-  .ai-chip{background:#F3F5F9;border:1px solid #E4E9F0;color:#48566A;font-size:12px;font-weight:600;padding:6px 13px;border-radius:999px}
-  .ai-cols{display:grid;grid-template-columns:1fr 1fr;gap:20px}
-  .ai-col{background:#FBFCFE;border:1px solid var(--line);border-radius:14px;padding:16px 18px}
-  .ai-col.analysis{border-color:#D6E7F6}
-  .ai-col.reco{border-color:#F5E6C6}
-  .ai-col h4{font-size:13px;font-weight:800;letter-spacing:.3px;margin-bottom:12px;display:flex;align-items:center;gap:8px;font-family:var(--head)}
-  .ai-col.analysis h4{color:#0B76C4}
-  .ai-col.reco h4{color:#B26A05}
-  .ai-list{list-style:none;display:flex;flex-direction:column;gap:11px}
-  .ai-list li{position:relative;padding-left:24px;font-size:13px;line-height:1.6;color:#3A4658}
-  .ai-col.analysis .ai-list li::before{content:"▸";position:absolute;left:4px;color:#2E9BE0;font-weight:800}
-  .ai-col.reco .ai-list li::before{content:"✓";position:absolute;left:2px;color:#E0930C;font-weight:800}
-  @media(max-width:900px){.ai-cols{grid-template-columns:1fr;gap:16px}}
   .posts{display:grid;grid-template-columns:repeat(5,1fr);gap:16px}
   .post{background:var(--panel);border:1px solid var(--line);border-radius:16px;overflow:hidden;display:flex;flex-direction:column;transition:.18s;text-decoration:none;color:inherit;box-shadow:var(--shadow)}
   .post:hover{transform:translateY(-4px);box-shadow:0 14px 30px rgba(16,24,40,.13)}
@@ -498,10 +475,9 @@ HTML = r'''<!DOCTYPE html>
     <div id="allGrid"></div>
   </div>
 
-  <div class="section-title" id="postsTitle">วิเคราะห์คอนเทนต์รายเพจ &amp; ข้อเสนอแนะเดือนถัดไป</div>
-  <div class="section-sub" id="postsSub">เลือกเพจเพื่อดูบทวิเคราะห์คอนเทนต์ทั้งหมด, กล่องข้อเสนอแนะ และ Top 5 คอนเทนต์</div>
+  <div class="section-title">คอนเทนต์เด่นรายเพจ</div>
+  <div class="section-sub">เลือกเพจเพื่อดู Top 5 คอนเทนต์ที่ได้ Engagement สูงสุดของเดือน</div>
   <div class="tabs" id="tabs"></div>
-  <div class="ai-box" id="aiBox"></div>
   <div class="posts" id="posts"></div>
 
   <div class="card sum-box" id="sumBox" hidden>
@@ -738,59 +714,9 @@ document.getElementById('bsGrid').innerHTML = (DATA.mo||[]).map(r=>{
 
 const tabsEl = document.getElementById('tabs');
 const postsEl = document.getElementById('posts');
-const aiEl = document.getElementById('aiBox');
-/* No page in this report has authored analysis, so the section is Top 5 posts
-   and nothing else — say that in the heading rather than promising commentary
-   and then repeating "not written yet" under every tab. */
-const HAS_AI = Object.keys(DATA.ai||{}).length > 0;
-if(!HAS_AI){
-  aiEl.hidden = true;
-  document.getElementById('postsTitle').textContent = 'คอนเทนต์เด่นรายเพจ';
-  document.getElementById('postsSub').textContent =
-    'เลือกเพจเพื่อดู Top 5 คอนเทนต์ที่ได้ Engagement สูงสุดของเดือน';
-}
 tabsEl.innerHTML = order.map((b,i)=>`
   <div class="tab${i===0?' active':''}" data-key="${b.key}" style="${i===0?'background:'+b.color:''}">
     <span class="tdot" style="background:${b.color}"></span>${b.name}</div>`).join('');
-
-function renderAI(key){
-  if(!HAS_AI) return;                     // the box is not on the page at all
-  const b = DATA.brands.find(x=>x.key===key);
-  const g = DATA.agg[key];
-  /* The prose in report_config.py is written by hand for specific pages, so
-     any brand outside that set has none. Say so instead of rendering a card
-     of blanks — the numbers above it are real either way. */
-  const a = DATA.ai[key];
-  aiEl.style.background = `linear-gradient(120deg,${b.color},#2563EB 55%,#06B6D4 90%)`;
-  const body = a ? `
-    <div class="ai-chips">${(a.chips||[]).map(c=>`<span class="ai-chip">${c}</span>`).join('')}</div>
-    <div class="ai-cols">
-      <div class="ai-col analysis">
-        <h4>📊 บทวิเคราะห์คอนเทนต์</h4>
-        <ul class="ai-list">${(a.analysis||[]).map(x=>`<li>${x}</li>`).join('')}</ul>
-      </div>
-      <div class="ai-col reco">
-        <h4>🚀 ควรทำต่อในเดือนถัดไป</h4>
-        <ul class="ai-list">${(a.reco||[]).map(x=>`<li>${x}</li>`).join('')}</ul>
-      </div>
-    </div>` : `
-    <div class="ai-cols">
-      <div class="ai-col analysis">
-        <h4>📊 ยังไม่มีบทวิเคราะห์ของแบรนด์นี้</h4>
-        <ul class="ai-list"><li>ตัวเลขและกราฟด้านบนมาจากการดึงข้อมูลจริง
-          ส่วนบทวิเคราะห์เป็นงานเขียนมือใน <code>report_config.py</code>
-          ซึ่งยังไม่มีของ ${b.name}</li></ul>
-      </div>
-    </div>`;
-  aiEl.innerHTML = `<div class="ai-inner">
-    <div class="ai-head">
-      <div class="ai-logo" style="background:linear-gradient(135deg,${b.color},#06B6D4)">✨</div>
-      <div class="t">บทวิเคราะห์ &amp; ข้อเสนอแนะ — ${b.name}
-        <small>วิเคราะห์จากคอนเทนต์ทั้งหมด ${g.posts} โพสต์ในเดือน__M_TH__ &middot; Engagement รวม ${fmt(g.total)} &middot; เฉลี่ย ${fmt(g.avg)}/โพสต์</small>
-      </div>
-    </div>${body}
-  </div>`;
-}
 
 // ---- All-content contact sheet (single box, all brands) ----
 const TH_MON = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
@@ -877,7 +803,7 @@ function renderPosts(key){
     </a>`;
   }).join('');
 }
-function selectPage(key){ renderAI(key); renderPosts(key); }
+function selectPage(key){ renderPosts(key); }
 /* No group picked yet means no brands at all — the header and its pickers are
    the whole page in that state, so there is nothing here to select. */
 if(order.length) selectPage(order[0].key);
