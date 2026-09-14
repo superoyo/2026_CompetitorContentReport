@@ -13,6 +13,7 @@ from pptx.chart.data import CategoryChartData
 from pptx.enum.chart import XL_CHART_TYPE
 from pptx.oxml.ns import qn
 from report_config import ANALYSIS as AUTHORED_ANALYSIS
+from report_config import CONTENT_SUMMARY as AUTHORED_SUMMARY
 
 # ---------- palette ----------
 DARK = RGBColor(0x0B, 0x14, 0x22)
@@ -22,6 +23,9 @@ CARD_BG = RGBColor(0xFF, 0xFF, 0xFF)
 ACCENT = RGBColor(0xFC, 0xA3, 0x11)
 WHITE = RGBColor(0xFF, 0xFF, 0xFF)
 TEXT_DARK = RGBColor(0x16, 0x1F, 0x30)
+# Thai names for the media types process.py records, so the deck reads the
+# same as the dashboard.
+FMT_TH = {"video": "วิดีโอ", "photo": "รูปภาพ", "text": "ข้อความ", "other": "อื่นๆ"}
 MUTED = RGBColor(0x64, 0x74, 0x88)
 RING = RGBColor(0x1E, 0x30, 0x50)
 PANEL = RGBColor(0x11, 0x1A, 0x2E)
@@ -54,8 +58,15 @@ BRANDS = P.get('brands') or brandset.load()
 # Commentary analyse.py wrote for this run; the hand-written prose in
 # report_config only applies to the month it was written for.
 _GEN = P.get('analysis') or {}
-ANALYSIS = _GEN.get('ai') if _GEN else (
+# `or {}` on both: a run that produced one block but not the other would
+# otherwise hand None to .get() and take the whole deck down with it.
+ANALYSIS = (_GEN.get('ai') or {}) if _GEN else (
     AUTHORED_ANALYSIS if M['iso'] == report_config.AUTHORED_MONTH else {})
+# The month overview the dashboard shows per page. Same rule as the analysis:
+# writing generated for this run is used as-is, hand-written prose only for the
+# month it was written about.
+SUMMARY = (_GEN.get('summary') or {}) if _GEN else (
+    AUTHORED_SUMMARY if M['iso'] == report_config.AUTHORED_MONTH else {})
 NAME = {b['key']: b['name'] for b in BRANDS}
 LETTER = {b['key']: b['letter'] for b in BRANDS}
 COLOR = {b['key']: b['color'] for b in BRANDS}
@@ -259,6 +270,52 @@ for key in ORDER:
                  size=11.5, color=(DARK if i == 1 else c), bold=True, align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE, font=HEAD_FONT)
         cx += CARD_W + CARD_GAP
     add_text(s, 0.6, CARD_TOP + 4.95 + 0.12, 12.1, 0.3, "Total = Likes/Reactions + Comments + Shares", size=9.5, color=MUTED, italic=True)
+
+    # --- Content overview slide ---
+    # What the month's content actually was, per page — the written overview
+    # plus the formats it was made of. Its own slide because the Top 5 cards
+    # reach 6.57" and the analysis boxes 6.85" of a 7.5" slide: neither has
+    # room left for a paragraph.
+    overview = ((SUMMARY or {}).get(key) or {}).get('overview', '').strip()
+    if overview:
+        s = add_slide(); set_bg(s, DARK)
+        add_ring(s, 12.9, 6.9, 2.2, RING, 1.4)
+        add_badge(s, 0.6, 0.5, 0.55, c, LETTER[key], fs=20)
+        add_text(s, 1.32, 0.46, 9.5, 0.5, display, size=23, color=WHITE, bold=True, font=HEAD_FONT)
+        add_text(s, 1.32, 0.98, 10.5, 0.4,
+                 "ภาพรวมคอนเทนต์ทั้งเดือน%s %d" % (M['th_full'], M['be_year']),
+                 size=12, color=hx('#9FC9DE'))
+
+        add_rect(s, 0.6, 1.75, 12.13, 3.15, fill=PANEL, radius=0.05,
+                 line_color=hx('#26507A'), line_w=1.25)
+        add_rect(s, 0.6, 1.75, 0.12, 3.15, fill=hx('#38BDF8'))
+        add_text(s, 0.95, 2.05, 11.5, 0.4, "🗂  คอนเทนต์เดือนนี้เป็นอย่างไร",
+                 size=15, color=hx('#7DD3FC'), bold=True, font=HEAD_FONT)
+        # python-pptx will not shrink text to fit, and the panel ends at 4.90":
+        # cap the paragraph so an unusually long overview cannot run past it.
+        add_text(s, 0.95, 2.62, 11.5, 2.2, truncate(overview, 300), size=12.5,
+                 color=hx('#DCE6F2'), ls=1.45)
+
+        # Formats the month was actually made of — counted, not described.
+        mix = (MET.get(key) or {}).get('media_mix') or {}
+        if mix:
+            add_text(s, 0.6, 5.15, 6.0, 0.35, "สัดส่วนฟอร์แมตที่ลงจริง",
+                     size=11.5, color=hx('#9FC9DE'), bold=True, font=HEAD_FONT)
+            mxx = 0.6
+            for t, n in sorted(mix.items(), key=lambda kv: -kv[1]):
+                lbl = "%s %d" % (FMT_TH.get(t, t), n)
+                w_est = 0.16 + len(lbl) * 0.105
+                add_rect(s, mxx, 5.58, w_est, 0.44, fill=PANEL, radius=0.3,
+                         line_color=hx('#2A3A57'), line_w=1.0)
+                add_text(s, mxx, 5.58, w_est, 0.44, lbl, size=11,
+                         color=hx('#C7D6EA'), bold=True,
+                         align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+                mxx += w_est + 0.16
+            add_text(s, 0.6, 6.25, 12.13, 0.35,
+                     "ฟอร์แมตที่ได้ Engagement เฉลี่ยสูงสุด: %s  ·  วันที่โพสต์แล้วเวิร์กที่สุด: %s"
+                     % (FMT_TH.get((MET.get(key) or {}).get('best_format'), '—'),
+                        (MET.get(key) or {}).get('best_dow') or '—'),
+                     size=11, color=MUTED)
 
     # --- Analysis + Reco slide ---
     # The prose is written by hand per page in report_config.py. A brand the
