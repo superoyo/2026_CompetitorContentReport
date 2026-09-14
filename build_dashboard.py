@@ -327,14 +327,6 @@ HTML = r'''<!DOCTYPE html>
   .cs-m .val{font-size:12.5px;color:#1B2430;margin-top:3px}
   .cs-m .val b{font-family:var(--head)}
   .cs-m .pl{color:#7A8694}
-  .cs-note{margin-top:13px;padding-top:12px;border-top:1px solid var(--line)}
-  .cs-note h4{font-family:var(--head);font-size:11.5px;font-weight:800;color:#0B7B57;margin-bottom:7px}
-  .cs-note ul{list-style:none;columns:2;column-gap:28px}
-  @media(max-width:860px){.cs-note ul{columns:1}}
-  .cs-note li{font-size:12px;line-height:1.62;color:#42505F;padding-left:13px;position:relative;
-    break-inside:avoid;margin-bottom:10px}
-  .cs-note li:before{content:'';position:absolute;left:0;top:6px;width:5px;height:5px;
-    border-radius:50%;background:#0B7B57}
   .cs-empty{font-size:12px;color:#7A8694;line-height:1.6}
   /* per-brand summary, bottom of the page */
   .bs-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(268px,1fr));gap:15px;margin-top:17px}
@@ -486,14 +478,14 @@ HTML = r'''<!DOCTYPE html>
     <div class="sum-grid" id="sumGrid"></div>
   </div>
 
-  <div id="klWrap"></div>
-
   <div class="card comp-sum">
     <h2>SUMMARY COMPETITOR — __M_TH__ __M_BE__</h2>
-    <div class="hint">อันดับของแต่ละเพจในทุกคอลัมน์ (เหรียญ = อันดับ 1–3 ของคอลัมน์นั้น เพจที่คะแนนเท่ากันได้อันดับเดียวกัน) พร้อมสรุปตำแหน่งของแบรนด์เราด้านขวา</div>
+    <div class="hint">อันดับของแต่ละเพจในทุกคอลัมน์ (เหรียญ = อันดับ 1–3 ของคอลัมน์นั้น เพจที่คะแนนเท่ากันได้อันดับเดียวกัน) พร้อมสรุปตำแหน่งของแบรนด์เราใต้ตาราง</div>
     <div class="cs-scroll"><table class="mo cs" id="csTable"></table></div>
     <div class="cs-side" id="csSide"></div>
   </div>
+
+  <div id="klWrap"></div>
 
   <div class="card brand-sum">
     <h2>สรุปรายเพจ — __M_TH__ __M_BE__</h2>
@@ -674,14 +666,12 @@ document.getElementById('csTable').innerHTML = `
     return `<div class="cs-m"><div class="lbl">${c.lbl}</div>
       <div class="val">${esc(short)} ทำได้ ${val}</div></div>`;
   }).join('');
-  const kl = (DATA.keylearning||{})[csMe];
-  const note = kl
-    ? `<div class="cs-note"><h4>${esc(kl.title||'สิ่งที่ควรทำต่อ')}</h4>
-       <ul>${(kl.points||[]).map(p=>`<li>${p}</li>`).join('')}</ul></div>`
-    : `<div class="cs-note"><div class="cs-empty">ยังไม่มีบทวิเคราะห์ของเดือนนี้ — กดเขียนบทวิเคราะห์เพื่อสร้าง</div></div>`;
+  /* The commentary that used to sit here now has its own box directly
+     below, so printing it again would repeat the same paragraphs twice
+     running. This panel keeps the places; that box keeps the reading. */
   side.innerHTML = `<h3>สรุปตำแหน่งของแบรนด์เรา</h3>
     <div class="cs-who">${esc(me.name)} · เทียบกับ ${total} เพจในกลุ่มนี้</div>
-    <div class="cs-mgrid">${lines}</div>${note}`;
+    <div class="cs-mgrid">${lines}</div>`;
 })();
 
 /* Per-brand summary. Holds what the Metrics Overview table stopped showing
