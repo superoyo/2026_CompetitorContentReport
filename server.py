@@ -31,6 +31,7 @@ Environment:
 Run locally:
     APIFY_TOKEN=apify_api_xxx REFRESH_KEY=letmein python3 server.py
 """
+import base64
 import functools
 import hmac
 import http.server
@@ -216,46 +217,103 @@ def deck_name(info):
     return "%s_%d_Engagement_Top5.pptx" % (info["en_full"], info["year"])
 
 
+DECK_IMAGES = os.path.join(ROOT, "deck_images")
+
+
+def deck_shim(group, month):
+    """Write a stored month out in the shape build_slides.py reads.
+
+    build_deck used to insist on the last pipeline run's working files, on the
+    grounds that the stored payload kept the page's numbers but not the
+    per-post detail the deck lays out. That is no longer true: top5 carries
+    each post's caption, date, format and its image inlined as a data URI.
+    Writing those images back to disk is all that stands between a stored
+    month and its deck — which matters because Railway keeps nothing written
+    at run time, so after every deploy the working files are gone while the
+    month itself is still safe in Postgres.
+
+    Returns the shim's path, or None when that month was never stored.
+    """
+    saved = store.load_report(group, month)
+    if not saved:
+        return None
+    payload = saved.get("payload") or {}
+    proc = processed_from_payload(group, month, payload)
+
+    os.makedirs(DECK_IMAGES, exist_ok=True)
+    for key, posts in (proc.get("top5") or {}).items():
+        safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in key)
+        for i, post in enumerate(posts, 1):
+            post["image_path"] = None
+            uri = post.get("img") or ""
+            if not uri.startswith("data:image"):
+                continue
+            try:
+                raw = base64.b64decode(uri.split(",", 1)[1])
+            except Exception:
+                continue
+            fp = os.path.join(DECK_IMAGES, "%s_%d.jpg" % (safe, i))
+            with open(fp, "wb") as f:
+                f.write(raw)
+            post["image_path"] = fp
+
+    # Commentary written for this very month travels with it. Hand-written
+    # prose does not: build_slides.py gates that on AUTHORED_MONTH itself, and
+    # passing it through here would slip past that check.
+    if payload.get("analysis_source") == "generated":
+        proc["analysis"] = {"ai": payload.get("ai") or {},
+                            "summary": payload.get("summary") or {},
+                            "keylearning": payload.get("keylearning") or {}}
+
+    path = "/tmp/ccr_deck_%s_%s.json" % (
+        "".join(c if c.isalnum() else "_" for c in (group or "none")), month)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(proc, f, ensure_ascii=False)
+    return path
+
+
 def build_deck(month, group=""):
     """Regenerate the deck for `month` from data already on disk.
 
     Costs nothing: it re-renders the processed JSON and never calls Apify.
     Returns the file path, or raises RuntimeError explaining what is missing.
 
-    Slides are built from the last pipeline run's working files rather than
-    from what is stored, because the stored payload holds the page's numbers,
-    not the per-post detail the deck lays out. So this can only produce the
-    deck for the month AND group that ran last — anything else is refused
-    rather than quietly labelled with the wrong group's name.
+    Preference order: the last pipeline run's working files when they are for
+    this month and group, then the month as stored in Postgres. The stored
+    route is what keeps the button working after a deploy, when everything
+    written at run time is gone but the month itself is not.
     """
     info = month_util.info(month)
     path = os.path.join(ROOT, deck_name(info))
-    if not os.path.exists(PROCESSED):
-        if os.path.exists(path):
-            return path                       # committed alongside the repo
-        raise RuntimeError("ยังไม่มีข้อมูลที่ประมวลผลไว้บนเซิร์ฟเวอร์ "
-                           "— ต้องกดโหลดข้อมูลใหม่ก่อนหนึ่งครั้ง")
     try:
-        held = json.load(open(PROCESSED))
+        held = json.load(open(PROCESSED)) if os.path.exists(PROCESSED) else {}
     except Exception:
         held = {}
-    have = held.get("month")
-    if have and have != info["iso"]:
-        raise RuntimeError("ข้อมูลบนเซิร์ฟเวอร์เป็นของเดือน %s ไม่ใช่ %s "
-                           "— เลือกเดือนแล้วกดโหลดข้อมูลใหม่ก่อน" % (have, info["iso"]))
     held_group = held.get("group_id") or ""
-    if group and held_group and held_group != group:
-        raise RuntimeError("ข้อมูลบนเซิร์ฟเวอร์เป็นของกลุ่ม %s ไม่ใช่ %s "
-                           "— กดโหลดข้อมูลใหม่ของกลุ่มนี้ก่อน" % (held_group, group))
+    fresh = (held.get("month") == info["iso"]
+             and (not group or not held_group or held_group == group))
+
     if os.path.exists(path):
         # A deck left over from another group would carry the wrong brands, so
-        # only reuse the file when it was made from the data we still hold.
-        if not group or held_group == group:
+        # only reuse the file when it came from data we can still vouch for.
+        if fresh or not held:
             return path
         os.remove(path)
+
+    source = PROCESSED if fresh else None
+    if source is None:
+        try:
+            source = deck_shim(group, info["iso"]) if group else None
+        except Exception as exc:
+            raise RuntimeError("อ่านเดือนที่เก็บไว้ไม่สำเร็จ — %s" % str(exc)[:120])
+    if source is None:
+        raise RuntimeError("ยังไม่มีข้อมูลเดือน %s ของกลุ่มนี้บนเซิร์ฟเวอร์ "
+                           "— ต้องกดโหลดข้อมูลใหม่ก่อนหนึ่งครั้ง" % info["iso"])
+
     proc = subprocess.run(
         [sys.executable, "build_slides.py"],
-        cwd=ROOT, env=dict(os.environ, REPORT_MONTH=info["iso"], PYTHONUNBUFFERED="1"),
+        cwd=ROOT, env=dict(os.environ, REPORT_MONTH=info["iso"],
+                           PROCESSED_JSON=source, PYTHONUNBUFFERED="1"),
         capture_output=True, text=True, timeout=600,
     )
     if proc.returncode != 0 or not os.path.exists(path):

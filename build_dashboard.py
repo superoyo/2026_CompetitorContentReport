@@ -433,8 +433,13 @@ HTML = r'''<!DOCTYPE html>
               <div class="mp-note" id="mpNote">เลือกเดือน แล้วกดปุ่มโหลดข้อมูลใหม่ · เดือนที่ยังไม่มาถึงจะกดไม่ได้</div>
             </div>
           </div>
-          <a id="pptBtn" class="pt-btn" href="__PPT_FILE__" download>
-            <span>⬇</span><span id="pptLbl">ดาวน์โหลด PPT</span>
+          <!-- No href in the markup on purpose. This page is several megabytes,
+               so there is a real window before the script runs; an anchor with
+               download= pointing at a month whose file is missing would save
+               the 404 page itself as the .pptx. The script adds the link only
+               once it has confirmed the file is there. -->
+          <a id="pptBtn" class="pt-btn off">
+            <span>⬇</span><span id="pptLbl">กำลังตรวจไฟล์ PPT…</span>
           </a>
           <button id="anBtn" class="an-btn" type="button" hidden>
             <span class="ic" id="anIc">✨</span><span id="anLbl">เขียนบทวิเคราะห์</span>
@@ -1383,6 +1388,9 @@ window.FBDASH = {group:'', months:{}, brands:[], ready:false};
           });
         }
         return r.blob().then(function(b){
+          /* Never hand the viewer a file that is not the deck. */
+          if(b.type && b.type.indexOf('presentationml')<0)
+            throw new Error('เซิร์ฟเวอร์ไม่ได้ส่งไฟล์สไลด์กลับมา (' + b.type + ')');
           var u=URL.createObjectURL(b), t=document.createElement('a');
           t.href=u; t.download=deckName(iso);
           document.body.appendChild(t); t.click(); t.remove();
@@ -1410,6 +1418,10 @@ window.FBDASH = {group:'', months:{}, brands:[], ready:false};
 
       fetch(file,{method:'HEAD'}).then(function(r){
         if(!r.ok) throw new Error('missing');
+        /* A 200 alone is not proof: a host that answers missing paths with an
+           error page would have us link to HTML. Check what it says it is. */
+        if((r.headers.get('Content-Type')||'').indexOf('presentationml')<0)
+          throw new Error('not a deck');
         if(stale()) return;
         a.setAttribute('href',file); a.setAttribute('download','');
         var n=parseInt(r.headers.get('Content-Length')||'0',10);
@@ -1444,8 +1456,7 @@ for token, value in (('__M_TH__', M['th_full']), ('__M_ABBR__', M['th_abbr']),
                      ('__M_BE__', str(M['be_year'])), ('__M_EN__', M['en_label']),
                      ('__M_DAYS__', str(M['days'])), ('__M_ISO__', M['iso']),
                      ('__M_PAGES__', str(len(DATA.get('brands') or []))),
-                     ('__GROUP_ID__', DATA.get('group_id') or ''),
-                     ('__PPT_FILE__', '%s_%d_Engagement_Top5.pptx' % (M['en_full'], M['year']))):
+                     ('__GROUP_ID__', DATA.get('group_id') or '')):
     html = html.replace(token, value)
 # index.html is the site homepage served by GitHub / Railway
 out = os.environ.get('DASHBOARD_HTML') or os.path.join(ROOT, "index.html")

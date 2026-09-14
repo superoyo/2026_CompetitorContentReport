@@ -16,3 +16,6 @@ slides_output/
 # Page profile pictures, downloaded fresh with every scrape and inlined into
 # the payload — nothing reads them off disk after the run that made them
 page_avatars/
+
+# images written back from a stored month when rebuilding its deck
+deck_images/
