@@ -58,6 +58,10 @@
   thead th{font-family:var(--head);font-size:12px;font-weight:700;color:var(--muted);padding:12px 5px;
     background:var(--panel2);position:sticky;top:0}
   th.g,td.g{text-align:left;padding-left:18px;position:sticky;left:0;background:var(--panel);z-index:1;min-width:210px}
+  /* Fixed layout: column widths never follow content, so nothing appearing in
+     a cell (the PPT buttons on hover) can make the whole grid reflow. */
+  #grid table{table-layout:fixed}
+  #grid th.g{width:240px}
   thead th.g{background:var(--panel2);z-index:2}
   tbody tr:last-child td{border-bottom:none}
   tbody tr:hover td{background:#FAFBFC}
@@ -96,12 +100,19 @@
     font-family:var(--head);font-size:11px;font-weight:700;padding:0 8px;white-space:nowrap;overflow:hidden;
     text-align:left;display:flex;align-items:center;gap:5px;cursor:default;min-width:0}
   .dk-bar .lbl{overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1}
-  .dk-bar:hover{background:#FDE9C8;border-color:#E7A44A;overflow:visible;z-index:3}
+  .dk-bar[tabindex]{overflow:visible}
+  .dk-bar:hover,.dk-bar:focus-within{background:#FDE9C8;border-color:#E7A44A;z-index:4}
   .dk-bar .m{font-weight:600;opacity:.75}
-  /* download / delete, shown on hover (always on touch screens) */
-  .dk-acts{display:none;gap:3px;flex:none;margin-left:auto}
+  /* download / delete: a small float over the bar's top-right corner, so it
+     takes no room in the bar and never moves anything. It overlaps the bar by
+     a few pixels so the pointer can travel onto it without leaving :hover. */
+  .dk-acts{display:none;position:absolute;right:4px;bottom:calc(100% - 4px);gap:3px;padding:3px;
+    background:#fff;border:1px solid #E7A44A;border-radius:8px;box-shadow:0 6px 16px rgba(16,24,40,.16);z-index:5}
   .dk-bar:hover .dk-acts,.dk-bar:focus-within .dk-acts{display:flex}
-  @media (hover:none){ .dk-acts{display:flex} }
+  @media (hover:none){
+    .dk-bar[tabindex]{padding-right:4px}
+    .dk-acts{display:flex;position:static;flex:none;padding:0;border:none;box-shadow:none;background:none}
+  }
   .dk-act{border:1px solid #E7A44A;background:#fff;color:#8A5300;border-radius:6px;height:20px;padding:0 7px;
     font-family:var(--head);font-size:10.5px;font-weight:700;cursor:pointer;white-space:nowrap}
   .dk-act:hover{background:#8A5300;color:#fff;border-color:#8A5300}
