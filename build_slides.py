@@ -73,7 +73,10 @@ COLOR = {b['key']: b['color'] for b in BRANDS}
 ORDER = sorted([b['key'] for b in BRANDS if b['key'] in AGG],
                key=lambda k: AGG[k]['total'], reverse=True)
 
-prs = Presentation()
+# build_deck_multi.py runs this once per month into one shared deck, passing
+# SHARED_PRS in; it then saves the whole thing itself.
+SHARED = globals().get('SHARED_PRS')
+prs = SHARED or Presentation()
 prs.slide_width = SLIDE_W
 prs.slide_height = SLIDE_H
 blank = prs.slide_layouts[6]
@@ -358,6 +361,9 @@ for key in ORDER:
         ry2 += 1.16
 
 # ============ Closing ============
+# A deck of several months closes once, after the last of them.
+if SHARED is not None and not globals().get('LAST_MONTH', True):
+    raise SystemExit(0)
 s = add_slide(); set_bg(s, DARK)
 add_ring(s, 13.6, 7.9, 2.6, RING, 1.6); add_ring(s, -0.3, -0.3, 1.3, RING, 1.6)
 add_text(s, 1.0, 1.0, 11.3, 0.6, "หมายเหตุข้อมูล", size=26, color=WHITE, bold=True, font=HEAD_FONT)
@@ -377,5 +383,6 @@ for n in notes:
 
 # Name the deck after the month; build_dashboard.py links the download button here.
 out = os.path.join(ROOT, "%s_%d_Engagement_Top5.pptx" % (M["en_full"], M["year"]))
-prs.save(out)
-print("saved", out, "slides:", len(prs.slides._sldIdLst))
+if SHARED is None:
+    prs.save(out)
+    print("saved", out, "slides:", len(prs.slides._sldIdLst))

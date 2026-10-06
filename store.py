@@ -18,6 +18,9 @@ with the container in production — the API says so rather than pretending.
                    visit opens on the same set instead of asking again
     ccr_jobs       the admin page's fetch queue — kept here, not in memory, so
                    closing the page or redeploying does not lose what was asked
+    ccr_decks      PPT files built from the admin page, one or several months
+                   each, so they can be downloaded after the box that built
+                   them is gone
 """
 import datetime
 import json
@@ -114,6 +117,18 @@ CREATE TABLE IF NOT EXISTS ccr_jobs (
   started_at  TIMESTAMPTZ,
   step_at     TIMESTAMPTZ,
   finished_at TIMESTAMPTZ
+);
+ALTER TABLE ccr_jobs ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'fetch';
+ALTER TABLE ccr_jobs ADD COLUMN IF NOT EXISTS note TEXT NOT NULL DEFAULT '';
+ALTER TABLE ccr_jobs ADD COLUMN IF NOT EXISTS months JSONB NOT NULL DEFAULT '[]'::jsonb;
+CREATE TABLE IF NOT EXISTS ccr_decks (
+  id         BIGSERIAL PRIMARY KEY,
+  group_id   TEXT NOT NULL,
+  months     JSONB NOT NULL,
+  filename   TEXT NOT NULL,
+  size       INTEGER NOT NULL,
+  data       BYTEA NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 """
 
@@ -333,7 +348,7 @@ def load_selection(group_id):
 
 JOB_COLS = ("id", "group_id", "group_name", "month", "status", "step", "error",
             "cost_usd", "cost_detail", "dismissed", "created_at", "started_at",
-            "step_at", "finished_at")
+            "step_at", "finished_at", "kind", "note", "months")
 _TIMES = ("created_at", "started_at", "step_at", "finished_at")
 
 
@@ -354,23 +369,29 @@ def _sql_cols():
 
 
 def add_jobs(items):
-    """Queue [{group_id, group_name, month}]. A pair already waiting or running
-    is skipped rather than fetched twice. Returns the jobs actually queued."""
+    """Queue [{group_id, group_name, month, kind, months}]. kind is "fetch" (the
+    whole pipeline), "analyse" (commentary only, for a month already stored) or
+    "ppt" (one deck from `months`; `month` is then the first of them). The same
+    job already waiting or running is skipped rather than run twice. Returns
+    the jobs actually queued."""
     added = []
     if available():
         try:
             with _connect() as con:
                 for it in items:
+                    kind, months = it.get("kind") or "fetch", it.get("months") or []
                     busy = con.execute(
                         "SELECT 1 FROM ccr_jobs WHERE group_id = %s AND month = %s "
+                        "AND kind = %s AND months = %s::jsonb "
                         "AND status IN ('queued', 'running')",
-                        (it["group_id"], it["month"])).fetchone()
+                        (it["group_id"], it["month"], kind, json.dumps(months))).fetchone()
                     if busy:
                         continue
                     row = con.execute(
-                        "INSERT INTO ccr_jobs (group_id, group_name, month) "
-                        "VALUES (%s, %s, %s) RETURNING " + _sql_cols(),
-                        (it["group_id"], it.get("group_name") or "", it["month"])).fetchone()
+                        "INSERT INTO ccr_jobs (group_id, group_name, month, kind, months) "
+                        "VALUES (%s, %s, %s, %s, %s::jsonb) RETURNING " + _sql_cols(),
+                        (it["group_id"], it.get("group_name") or "", it["month"],
+                         kind, json.dumps(months))).fetchone()
                     added.append(_job_row(row))
             return added
         except Exception as exc:
@@ -379,7 +400,9 @@ def add_jobs(items):
         blob = _file()
         jobs = blob.setdefault("jobs", [])
         for it in items:
+            kind, months = it.get("kind") or "fetch", it.get("months") or []
             if any(j["group_id"] == it["group_id"] and j["month"] == it["month"]
+                   and (j.get("kind") or "fetch") == kind and (j.get("months") or []) == months
                    and j["status"] in ("queued", "running") for j in jobs):
                 continue
             blob["job_seq"] = blob.get("job_seq", 0) + 1
@@ -387,6 +410,7 @@ def add_jobs(items):
             job.update(id=blob["job_seq"], group_id=it["group_id"],
                        group_name=it.get("group_name") or "", month=it["month"],
                        status="queued", step="", error="", cost_detail={},
+                       kind=kind, months=months, note="",
                        dismissed=False, created_at=_now())
             jobs.append(job)
             added.append(dict(job))
@@ -438,8 +462,8 @@ def update_job(job_id, **fields):
                     raise ValueError("unknown job column %s" % k)
                 if k in _TIMES and v is not None:
                     sets.append("%s = now()" % k)      # the database's clock, not ours
-                elif k == "cost_detail":
-                    sets.append("cost_detail = %s::jsonb")
+                elif k in ("cost_detail", "months"):
+                    sets.append("%s = %%s::jsonb" % k)
                     vals.append(json.dumps(v, ensure_ascii=False))
                 else:
                     sets.append("%s = %%s" % k)
@@ -521,18 +545,89 @@ def recover_jobs(reason):
 
 
 def average_cost(limit=20):
-    """Mean cost of recent finished fetches, for the estimate shown before
-    queuing more. None until something has finished with a known cost."""
+    """Mean cost of recent finished fetches (not analysis-only or PPT jobs,
+    which cost far less), for the estimate shown before queuing more. None until something has finished with a known cost."""
     if available():
         try:
             with _connect() as con:
                 row = con.execute(
                     "SELECT avg(cost_usd), count(*) FROM (SELECT cost_usd FROM ccr_jobs "
-                    "WHERE status = 'done' AND cost_usd IS NOT NULL "
+                    "WHERE status = 'done' AND kind = 'fetch' AND cost_usd IS NOT NULL "
                     "ORDER BY id DESC LIMIT %s) t", (limit,)).fetchone()
             return float(row[0]) if row and row[1] else None
         except Exception as exc:
             _degrade(exc)
     got = [j["cost_usd"] for j in _file().get("jobs", [])
-           if j["status"] == "done" and j.get("cost_usd") is not None][-limit:]
+           if j["status"] == "done" and (j.get("kind") or "fetch") == "fetch"
+           and j.get("cost_usd") is not None][-limit:]
     return sum(got) / len(got) if got else None
+
+
+# ------------------------------------------------------------------------ decks
+
+DECK_DIR = FALLBACK + ".decks"
+
+
+def save_deck(group_id, months, filename, data):
+    """Keep a built PPT. One deck per (group, months): rebuilding replaces it."""
+    months = sorted(months)
+    if available():
+        try:
+            with _connect() as con:
+                con.execute("DELETE FROM ccr_decks WHERE group_id = %s AND months = %s::jsonb",
+                            (group_id, json.dumps(months)))
+                row = con.execute(
+                    "INSERT INTO ccr_decks (group_id, months, filename, size, data) "
+                    "VALUES (%s, %s::jsonb, %s, %s, %s) RETURNING id",
+                    (group_id, json.dumps(months), filename, len(data), data)).fetchone()
+            return row[0]
+        except Exception as exc:
+            _degrade(exc)
+    with _LOCK:
+        blob = _file()
+        decks = [d for d in blob.get("decks", [])
+                 if not (d["group_id"] == group_id and d["months"] == months)]
+        blob["deck_seq"] = blob.get("deck_seq", 0) + 1
+        os.makedirs(DECK_DIR, exist_ok=True)
+        with open(os.path.join(DECK_DIR, "%d.pptx" % blob["deck_seq"]), "wb") as f:
+            f.write(data)
+        decks.append({"id": blob["deck_seq"], "group_id": group_id, "months": months,
+                      "filename": filename, "size": len(data), "created_at": _now()})
+        blob["decks"] = decks
+        _write_file(blob)
+        return blob["deck_seq"]
+
+
+def list_decks():
+    """Every deck kept, without its bytes."""
+    if available():
+        try:
+            with _connect() as con:
+                rows = con.execute("SELECT id, group_id, months, filename, size, created_at "
+                                   "FROM ccr_decks ORDER BY id").fetchall()
+            return [{"id": r[0], "group_id": r[1], "months": r[2], "filename": r[3],
+                     "size": r[4], "created_at": r[5].isoformat(timespec="seconds")}
+                    for r in rows]
+        except Exception as exc:
+            _degrade(exc)
+    return _file().get("decks", [])
+
+
+def load_deck(deck_id):
+    """(filename, bytes) or None."""
+    if available():
+        try:
+            with _connect() as con:
+                row = con.execute("SELECT filename, data FROM ccr_decks WHERE id = %s",
+                                  (deck_id,)).fetchone()
+            return (row[0], bytes(row[1])) if row else None
+        except Exception as exc:
+            _degrade(exc)
+    for d in _file().get("decks", []):
+        if d["id"] == deck_id:
+            try:
+                with open(os.path.join(DECK_DIR, "%d.pptx" % deck_id), "rb") as f:
+                    return d["filename"], f.read()
+            except OSError:
+                return None
+    return None

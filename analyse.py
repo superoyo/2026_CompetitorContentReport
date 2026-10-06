@@ -377,6 +377,9 @@ def save(P, analysis):
     with open(PROCESSED, "w", encoding="utf-8") as f:
         json.dump(P, f, ensure_ascii=False, indent=1)
     print("SAVED", PROCESSED, flush=True)
+    # For the admin queue: whether this month got commentary. When it did not,
+    # the line printed just before SAVED says why.
+    print("ANALYSIS_STATUS %s" % ("ok" if analysis else "skip"), flush=True)
 
 
 if __name__ == "__main__":

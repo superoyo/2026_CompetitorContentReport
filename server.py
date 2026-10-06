@@ -21,6 +21,7 @@ at again later — Railway's filesystem does not survive a deploy.
     GET  /api/admin/jobs           the queue alone, for polling
     POST /api/admin/jobs           queue [{group, month}] to fetch
     POST /api/admin/jobs/<id>/retry|cancel|dismiss
+    GET  /api/admin/decks/<id>     download a PPT built from the admin page
 
 The Apify token stays server-side: it is read from $APIFY_TOKEN and never
 reaches the page. Because the site is public, the refresh endpoint is gated on
@@ -255,7 +256,10 @@ def deck_shim(group, month):
     payload = saved.get("payload") or {}
     proc = processed_from_payload(group, month, payload)
 
-    os.makedirs(DECK_IMAGES, exist_ok=True)
+    # One folder per month: a deck of several months writes each month's
+    # images before rendering any of them, and the file names repeat.
+    img_dir = os.path.join(DECK_IMAGES, month)
+    os.makedirs(img_dir, exist_ok=True)
     for key, posts in (proc.get("top5") or {}).items():
         safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in key)
         for i, post in enumerate(posts, 1):
@@ -267,7 +271,7 @@ def deck_shim(group, month):
                 raw = base64.b64decode(uri.split(",", 1)[1])
             except Exception:
                 continue
-            fp = os.path.join(DECK_IMAGES, "%s_%d.jpg" % (safe, i))
+            fp = os.path.join(img_dir, "%s_%d.jpg" % (safe, i))
             with open(fp, "wb") as f:
                 f.write(raw)
             post["image_path"] = fp
@@ -376,6 +380,30 @@ def _run_step(script, env, timeout=3600):
     return proc.returncode, out or "", err or ""
 
 
+def _costs(out, costs, fallback):
+    """Add a step's COST_USD lines to `costs`."""
+    for line in out.splitlines():
+        if line.startswith("COST_USD "):
+            bits = line.split()
+            try:
+                costs[bits[2] if len(bits) > 2 else fallback] = float(bits[1])
+            except (IndexError, ValueError):
+                pass
+
+
+def _analysis_skipped(out):
+    """None when analyse.py wrote commentary, else the reason it gave.
+
+    analyse.py never fails the run over commentary — it saves the month
+    without it and says why on the line before SAVED.
+    """
+    lines = [l.strip() for l in out.splitlines() if l.strip()]
+    if "ANALYSIS_STATUS ok" in lines:
+        return None
+    why = [l for l in lines if not l.startswith(("SAVED", "ANALYSIS_STATUS", "COST_USD"))]
+    return why[-1][:300] if why else "ไม่ทราบสาเหตุ"
+
+
 def run_pipeline(group, month, brands, job_id=None):
     """Execute the pipeline steps in order, then keep what came out.
 
@@ -389,7 +417,7 @@ def run_pipeline(group, month, brands, job_id=None):
                PYTHONUNBUFFERED="1")
     env.pop("DASHBOARD_FROM_DATA", None)      # this run builds a payload, not renders one
     _log("=== %s · เดือน %s · %d แบรนด์ ===" % (group or "(ชุดเดิม)", month, len(brands)))
-    costs = {}
+    costs, note = {}, ""
     try:
         for label, script in STEPS:
             with JOB_LOCK:
@@ -398,13 +426,10 @@ def run_pipeline(group, month, brands, job_id=None):
                 store.update_job(job_id, step=label, step_at=True)
             _log("=== %s (%s) ===" % (label, script))
             code, out, err = _run_step(script, env)
-            for line in out.splitlines():
-                if line.startswith("COST_USD "):
-                    bits = line.split()
-                    try:
-                        costs[bits[2] if len(bits) > 2 else script] = float(bits[1])
-                    except (IndexError, ValueError):
-                        pass
+            _costs(out, costs, script)
+            if script == "analyse.py" and code == 0:
+                why = _analysis_skipped(out)
+                note = "ไม่ได้เขียนบทวิเคราะห์ — %s" % why if why else ""
             for line in out.splitlines()[-40:]:
                 _log(line)
             if job_id in RESTART:
@@ -421,7 +446,7 @@ def run_pipeline(group, month, brands, job_id=None):
             JOB["step"] = "เสร็จสมบูรณ์"
             JOB["error"] = ""
         if job_id:
-            store.update_job(job_id, status="done", step="เสร็จสมบูรณ์", error="",
+            store.update_job(job_id, status="done", step="เสร็จสมบูรณ์", error="", note=note,
                              cost_usd=round(sum(costs.values()), 4) if costs else None,
                              cost_detail=costs, finished_at=True)
     except Exception as exc:                      # surfaced to the page as-is
@@ -445,6 +470,79 @@ def run_pipeline(group, month, brands, job_id=None):
 
 
 # ---------------------------------------------------------------- admin queue
+
+def deck_filename(name, months):
+    """e.g. PAO_Aug-Oct_2026_Engagement.pptx — readable once it is downloaded."""
+    safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in (name or "group")).strip("_")
+    a, b = month_util.info(months[0]), month_util.info(months[-1])
+    if len(months) == 1:
+        span = "%s_%d" % (a["en_full"][:3], a["year"])
+    elif a["year"] == b["year"]:
+        span = "%s-%s_%d" % (a["en_full"][:3], b["en_full"][:3], a["year"])
+    else:
+        span = "%s_%d-%s_%d" % (a["en_full"][:3], a["year"], b["en_full"][:3], b["year"])
+    return "%s_%s_Engagement.pptx" % (safe or "group", span)
+
+
+def run_deck(job):
+    """Build one PPT from the job's months (already stored) and keep it."""
+    job_id, group = job["id"], job["group_id"]
+    months = sorted(job.get("months") or [job["month"]])
+    out = "/tmp/ccr_deck_out_%d.pptx" % job_id
+    shims = []
+    try:
+        with JOB_LOCK:
+            JOB["step"] = "สร้าง PPT"
+        store.update_job(job_id, step="เตรียมข้อมูล", step_at=True)
+        missing = [m for m in months if not store.load_report(group, m)]
+        if missing:
+            raise RuntimeError("ยังไม่มีข้อมูลเดือน %s — ดึงข้อมูลก่อนแล้วกด Retry"
+                               % ", ".join(missing))
+        sources = []
+        for m in months:
+            path = deck_shim(group, m)
+            shims.append(path)
+            sources.append({"month": m, "processed": path})
+
+        store.update_job(job_id, step="สร้าง PPT", step_at=True)
+        _log("=== สร้าง PPT %s · %s ===" % (group, ", ".join(months)))
+        code, out_text, err = _run_step(
+            "build_deck_multi.py",
+            dict(os.environ, DECK_SOURCES=json.dumps(sources), DECK_OUT=out,
+                 PYTHONUNBUFFERED="1"), timeout=900)
+        for line in out_text.splitlines()[-10:]:
+            _log(line)
+        if job_id in RESTART:
+            raise RuntimeError("ยกเลิกเพื่อเริ่มใหม่")
+        if code != 0 or not os.path.exists(out):
+            raise RuntimeError("สร้างสไลด์ไม่สำเร็จ — %s" % explain(err))
+
+        store.update_job(job_id, step="บันทึกไฟล์", step_at=True)
+        with open(out, "rb") as f:
+            data = f.read()
+        name = deck_filename(job.get("group_name") or group, months)
+        store.save_deck(group, months, name, data)
+        store.update_job(job_id, status="done", step="เสร็จสมบูรณ์", error="",
+                         note="%s · %.1f MB" % (name, len(data) / 1048576.0),
+                         cost_usd=0, cost_detail={}, finished_at=True)
+    except Exception as exc:
+        _log("ERROR: %s" % exc)
+        if job_id in RESTART:
+            RESTART.discard(job_id)
+            store.update_job(job_id, status="queued", step="", error="",
+                             started_at=None, step_at=None, finished_at=None)
+        else:
+            store.update_job(job_id, status="failed", error=str(exc), finished_at=True)
+    finally:
+        for path in shims + [out]:
+            try:
+                os.remove(path)
+            except (OSError, TypeError):
+                pass
+        with JOB_LOCK:
+            JOB["running"] = False
+            JOB["last_finished"] = time.strftime("%Y-%m-%d %H:%M")
+
 
 def queue_worker():
     """Run queued admin jobs one at a time, for as long as the server lives.
@@ -470,6 +568,14 @@ def queue_worker():
                 JOB.update(step="กำลังเริ่ม", error="", log=[], month=job["month"],
                            group=job["group_id"], started=time.strftime("%Y-%m-%d %H:%M"))
                 CURRENT["job"] = job["id"]
+            if job.get("kind") == "ppt":
+                run_deck(job)
+                WAKE.set()
+                continue
+            if job.get("kind") == "analyse":
+                run_analysis(job["group_id"], job["month"], job_id=job["id"])
+                WAKE.set()
+                continue
             try:
                 if not APIFY_TOKEN:
                     raise RuntimeError("ยังไม่ได้ตั้งค่า APIFY_TOKEN บนเซิร์ฟเวอร์")
@@ -511,9 +617,11 @@ def admin_overview():
         "agency_error": agency_error,
         "current_month": month_util.info(time.strftime("%Y-%m"))["iso"],
         "configured": bool(APIFY_TOKEN),
+        "analysis": bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHOPIC_KEY")),
         "durable": store.available(),
         "storage_note": store.why_unavailable(),
         "average_cost": store.average_cost(),
+        "decks": store.list_decks(),
         "jobs": store.list_jobs(),
     }
 
@@ -545,12 +653,23 @@ def processed_from_payload(group, month, payload):
     }
 
 
-def run_analysis(group, month):
-    """Write commentary for a month already stored, and keep it."""
+def run_analysis(group, month, job_id=None):
+    """Write commentary for a month already stored, and keep it.
+
+    With job_id it is an admin queue job: progress and cost go on that row,
+    and a retry from the page can kill it like any pipeline step.
+    """
     shim = "/tmp/ccr_reanalyse.json"
-    try:
+    costs = {}
+
+    def step(label):
         with JOB_LOCK:
-            JOB["step"] = "อ่านข้อมูลเดือนที่เก็บไว้"
+            JOB["step"] = label
+        if job_id:
+            store.update_job(job_id, step=label, step_at=True)
+
+    try:
+        step("อ่านข้อมูลเดือนที่เก็บไว้")
         saved = store.load_report(group, month)
         if not saved:
             raise RuntimeError("ยังไม่มีข้อมูลเดือนนี้ — ต้องกดโหลดข้อมูลใหม่ก่อน")
@@ -558,24 +677,25 @@ def run_analysis(group, month):
         with open(shim, "w", encoding="utf-8") as f:
             json.dump(processed_from_payload(group, month, payload), f, ensure_ascii=False)
 
-        with JOB_LOCK:
-            JOB["step"] = "เขียนบทวิเคราะห์"
+        step("เขียนบทวิเคราะห์")
         _log("=== เขียนบทวิเคราะห์ %s · เดือน %s (ไม่เรียก Apify) ===" % (group, month))
-        proc = subprocess.run(
-            [sys.executable, "analyse.py"],
-            cwd=ROOT, timeout=900, capture_output=True, text=True,
-            env=dict(os.environ, PROCESSED_JSON=shim, PYTHONUNBUFFERED="1"),
-        )
-        for line in (proc.stdout or "").splitlines()[-20:]:
+        code, out, err = _run_step(
+            "analyse.py", dict(os.environ, PROCESSED_JSON=shim, PYTHONUNBUFFERED="1"),
+            timeout=900)
+        _costs(out, costs, "claude")
+        for line in out.splitlines()[-20:]:
             _log(line)
-        if proc.returncode != 0:
-            raise RuntimeError(explain(proc.stderr))
+        if job_id in RESTART:
+            raise RuntimeError("ยกเลิกเพื่อเริ่มใหม่")
+        if code != 0:
+            raise RuntimeError(explain(err))
 
         with open(shim, encoding="utf-8") as f:
             got = (json.load(f) or {}).get("analysis")
         if not got:
-            raise RuntimeError("ไม่ได้บทวิเคราะห์กลับมา — ดู log ด้านบน")
+            raise RuntimeError("ไม่ได้บทวิเคราะห์กลับมา — %s" % _analysis_skipped(out))
 
+        step("บันทึกลงฐานข้อมูล")
         payload["ai"] = got.get("ai") or {}
         payload["summary"] = got.get("summary") or {}
         payload["keylearning"] = got.get("keylearning") or {}
@@ -585,11 +705,23 @@ def run_analysis(group, month):
         with JOB_LOCK:
             JOB["step"] = "เสร็จสมบูรณ์"
             JOB["error"] = ""
+        if job_id:
+            store.update_job(job_id, status="done", step="เสร็จสมบูรณ์", error="", note="",
+                             cost_usd=round(sum(costs.values()), 4) if costs else None,
+                             cost_detail=costs, finished_at=True)
     except Exception as exc:
         _log("ERROR: %s" % exc)
         with JOB_LOCK:
             JOB["error"] = str(exc)
             JOB["step"] = "ล้มเหลว"
+        if job_id in RESTART:
+            RESTART.discard(job_id)
+            store.update_job(job_id, status="queued", step="", error="",
+                             started_at=None, step_at=None, finished_at=None)
+        elif job_id:
+            store.update_job(job_id, status="failed", error=str(exc),
+                             cost_usd=round(sum(costs.values()), 4) if costs else None,
+                             cost_detail=costs, finished_at=True)
     finally:
         try:
             os.remove(shim)
@@ -717,7 +849,24 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 self._json(200, admin_overview()); return
             if route == "/api/admin/jobs":
                 self._json(200, {"jobs": store.list_jobs(),
+                                 "decks": store.list_decks(),
                                  "average_cost": store.average_cost()}); return
+            if route.startswith("/api/admin/decks/"):
+                try:
+                    got = store.load_deck(int(route.rsplit("/", 1)[1]))
+                except ValueError:
+                    got = None
+                if not got:
+                    self._json(404, {"error": "ไม่พบไฟล์นี้"}); return
+                name, data = got
+                self.send_response(200)
+                self.send_header("Content-Type", PPTX_MIME)
+                self.send_header("Content-Length", str(len(data)))
+                self.send_header("Content-Disposition", "attachment; filename*=UTF-8''%s"
+                                 % urllib.parse.quote(name))
+                self.end_headers()
+                self.wfile.write(data)
+                return
             self._json(404, {"error": "not found"}); return
 
         if route.endswith("/api/groups"):
@@ -912,18 +1061,30 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     def _admin_post(self, route):
         if route == "/api/admin/jobs":
-            if not APIFY_TOKEN:
-                self._json(503, {"error": "ยังไม่ได้ตั้งค่า APIFY_TOKEN บนเซิร์ฟเวอร์"}); return
             try:
                 items = []
                 for it in self._body().get("items") or []:
+                    kind = it.get("kind") if it.get("kind") in ("analyse", "ppt") else "fetch"
+                    if kind == "fetch" and not APIFY_TOKEN:
+                        raise ValueError("ยังไม่ได้ตั้งค่า APIFY_TOKEN บนเซิร์ฟเวอร์")
+                    months = []
+                    if kind == "ppt":
+                        months = sorted({str(m).strip() for m in it.get("months") or []})
+                        if not months:
+                            raise ValueError("ต้องเลือกอย่างน้อยหนึ่งเดือน")
+                        for m in months:
+                            month_util.parse(m)
+                        it = dict(it, month=months[0])
                     month = str(it.get("month") or "").strip()
                     month_util.parse(month)
                     if month > time.strftime("%Y-%m"):
                         raise ValueError("เดือน %s ยังมาไม่ถึง" % month)
                     group = str(it.get("group") or "").strip()
+                    if kind == "analyse" and group and not store.load_report(group, month):
+                        raise ValueError("ยังไม่มีข้อมูลเดือน %s ของกลุ่มนี้ — ต้องดึงข้อมูลก่อน" % month)
                     if group:
-                        items.append({"group_id": group, "month": month,
+                        items.append({"group_id": group, "month": month, "kind": kind,
+                                      "months": months,
                                       "group_name": str(it.get("name") or "")[:200]})
             except ValueError as exc:
                 self._json(400, {"error": str(exc)}); return
