@@ -92,10 +92,20 @@
   tr.dk td.g{font-family:var(--head);font-size:11px;font-weight:700;color:var(--muted);padding-left:36px;vertical-align:top;padding-top:5px}
   tr.dk:hover td{background:transparent}
   .dk-grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));column-gap:10px;row-gap:4px}
-  .dk-bar{border:1px solid #F3C98B;background:#FFF6E8;color:#8A5300;border-radius:7px;height:24px;
+  .dk-bar{position:relative;border:1px solid #F3C98B;background:#FFF6E8;color:#8A5300;border-radius:7px;height:26px;
     font-family:var(--head);font-size:11px;font-weight:700;padding:0 8px;white-space:nowrap;overflow:hidden;
-    text-overflow:ellipsis;text-align:left;display:flex;align-items:center;gap:5px}
-  .dk-bar:hover{background:#FDE9C8;border-color:#E7A44A}
+    text-align:left;display:flex;align-items:center;gap:5px;cursor:default;min-width:0}
+  .dk-bar .lbl{overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1}
+  .dk-bar:hover{background:#FDE9C8;border-color:#E7A44A;overflow:visible;z-index:3}
+  .dk-bar .m{font-weight:600;opacity:.75}
+  /* download / delete, shown on hover (always on touch screens) */
+  .dk-acts{display:none;gap:3px;flex:none;margin-left:auto}
+  .dk-bar:hover .dk-acts,.dk-bar:focus-within .dk-acts{display:flex}
+  @media (hover:none){ .dk-acts{display:flex} }
+  .dk-act{border:1px solid #E7A44A;background:#fff;color:#8A5300;border-radius:6px;height:20px;padding:0 7px;
+    font-family:var(--head);font-size:10.5px;font-weight:700;cursor:pointer;white-space:nowrap}
+  .dk-act:hover{background:#8A5300;color:#fff;border-color:#8A5300}
+  .dk-act.del:hover{background:var(--red);border-color:var(--red)}
   .dk-bar.multi{background:linear-gradient(90deg,#FFF6E8,#FDEBD0);border-style:solid}
   .dk-bar.pend{background:var(--panel2);border:1px dashed #C9D1DB;color:var(--muted);cursor:default}
   .dk-bar .n{background:#8A5300;color:#fff;border-radius:999px;padding:0 6px;font-size:10px;line-height:16px}
@@ -135,6 +145,25 @@
   .modal li .r{text-align:right}
   .modal .est{background:var(--panel2);border-radius:10px;padding:10px 13px;font-size:13px;color:#3B4654}
   .modal .acts{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}
+  .modal{max-width:520px}
+  .ai-box{margin-top:12px;border:1px solid var(--line);border-radius:12px;padding:11px 12px}
+  .ai-box label{font-family:var(--head);font-size:13px;font-weight:700;display:block}
+  .ai-box small{display:block;color:var(--muted);font-size:12px;margin:2px 0 8px}
+  .ai-box input{margin-top:0;font-size:13px;padding:8px 11px}
+  .ai-box select{width:100%;margin-top:6px;font-family:var(--body);font-size:13px;border:1px solid var(--line);
+    border-radius:10px;padding:4px;outline:none}
+  .ai-box select:focus{border-color:var(--blue)}
+  .ai-warn{color:var(--red);font-size:12.5px;margin-top:6px}
+  /* AI cost log */
+  .log{margin-top:22px}
+  .log summary{font-family:var(--head);font-size:15px;font-weight:800;cursor:pointer;padding:14px 18px;list-style:none;
+    display:flex;align-items:center;gap:10px}
+  .log summary::-webkit-details-marker{display:none}
+  .log summary .t{font-family:var(--body);font-weight:500;font-size:13px;color:var(--muted)}
+  .log table{min-width:760px}
+  .log td,.log th{text-align:left;font-size:12.5px;padding:8px 12px}
+  .log td.n,.log th.n{text-align:right;font-variant-numeric:tabular-nums}
+  .log .bad{color:var(--red)}
   .modal input{width:100%;margin-top:14px;font-size:15px;border:1px solid var(--line);border-radius:10px;
     padding:11px 13px;outline:none}
   .modal input:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(24,119,242,.15)}
@@ -236,6 +265,11 @@
 
   <div class="card"><div class="scroll" id="grid"><div class="empty">กำลังโหลด…</div></div></div>
 
+  <details class="card log" id="logBox">
+    <summary>บันทึกค่าใช้จ่าย AI <span class="t" id="logSum"></span></summary>
+    <div class="scroll" id="logBody"><div class="empty">กำลังโหลด…</div></div>
+  </details>
+
   <!-- password -->
   <div class="back-dim" id="gate">
     <form class="modal" id="gateForm">
@@ -256,6 +290,13 @@
       <h3 id="askTitle">ยืนยันการดึงข้อมูล</h3>
       <p id="askSub">—</p>
       <ul id="askList"></ul>
+      <div class="ai-box" id="aiBox" hidden>
+        <label for="aiFind">AI ที่ใช้สรุปรายงานและข้อเสนอแนะ</label>
+        <small id="aiHint">ผ่าน OpenRouter — ราคาต่อ 1 ล้าน token (เข้า / ออก)</small>
+        <input id="aiFind" type="search" placeholder="ค้นหาโมเดล เช่น claude, gpt, gemini…" autocomplete="off">
+        <select id="aiSel" size="6"></select>
+        <div class="ai-warn" id="aiWarn"></div>
+      </div>
       <div class="est" id="askEst">—</div>
       <div class="msg" id="askMsg"></div>
       <div class="acts">
@@ -461,17 +502,31 @@
         label = (it.job.status === 'running' ? '⏳ กำลังสร้าง PPT' : 'เข้าคิวสร้าง PPT')
           + (n > 1 ? ' · '+n+' เดือน' : '');
         tip = 'PPT '+spanLabel(it.months)+' — '+(it.job.status === 'running' ? 'กำลังสร้าง' : 'รอคิว');
+        if(it.job.model) label += ' · '+esc(shortModel(it.job.model));
       }else{
-        label = '⬇ PPT' + (n > 1 ? ' <span class="n">รวม '+n+' เดือน</span> '+esc(spanLabel(it.months)) : '');
+        var ai = it.deck.model ? shortModel(it.deck.model) : '';
+        label = 'PPT' + (n > 1 ? ' <span class="n">สรุป '+n+' เดือน</span> '+esc(spanLabel(it.months)) : '')
+          + (ai ? ' <span class="m">· '+esc(ai)+'</span>' : '');
         tip = it.deck.filename+' · '+(it.deck.size/1048576).toFixed(1)+' MB · '
-          + (n > 1 ? 'สร้างจาก '+n+' เดือน: '+spanLabel(it.months) : 'เดือน '+mLabel(it.months[0]))
-          + other+' · กดเพื่อดาวน์โหลด';
+          + (n > 1 ? 'สรุปจาก '+n+' เดือน: '+spanLabel(it.months) : 'เดือน '+mLabel(it.months[0]))
+          + (ai ? ' · AI: '+it.deck.model : '') + other;
       }
-      h += '<button type="button" class="dk-bar'+(it.job ? ' pend' : '')+(n > 1 ? ' multi' : '')
-        + '" style="grid-column:'+a+' / '+(b+1)+'" title="'+esc(tip)+'"'
-        + (it.deck ? ' data-deck="'+it.deck.id+'"' : '')+'>'+label+'</button>';
+      h += '<div class="dk-bar'+(it.job ? ' pend' : '')+(n > 1 ? ' multi' : '')
+        + '" style="grid-column:'+a+' / '+(b+1)+'" title="'+esc(tip)+'"'+(it.deck ? ' tabindex="0"' : '')+'>'
+        + '<span class="lbl">'+label+'</span>'
+        + (it.deck ? '<span class="dk-acts"><button type="button" class="dk-act" data-dl="'+it.deck.id+'">⬇ ดาวน์โหลด</button>'
+          + '<button type="button" class="dk-act del" data-del="'+it.deck.id+'">ลบ</button></span>' : '')
+        + '</div>';
     });
     return '<tr class="dk"><td class="g">PPT</td><td colspan="12"><div class="dk-grid">'+h+'</div></td></tr>';
+  }
+  function shortModel(id){ return String(id || '').split('/').pop(); }
+  function removeDeck(id){
+    var d = decks.filter(function(x){ return String(x.id) === String(id); })[0];
+    if(!confirm('ลบไฟล์ '+(d ? d.filename : 'นี้')+' ?\nลบแล้วกู้คืนไม่ได้ (สร้างใหม่ได้)')) return;
+    api('POST', 'decks/'+id+'/delete').then(function(j){
+      decks = j.decks || []; grid(); tray();
+    })['catch'](function(err){ alert('ลบไม่สำเร็จ — '+err.message); });
   }
   function download(id){
     var d = decks.filter(function(x){ return String(x.id) === String(id); })[0];
@@ -486,8 +541,10 @@
   }
 
   $('grid').addEventListener('click', function(e){
-    var dk = e.target.closest ? e.target.closest('.dk-bar[data-deck]') : null;
-    if(dk){ download(dk.getAttribute('data-deck')); return; }
+    var dl = e.target.closest ? e.target.closest('[data-dl]') : null;
+    if(dl){ download(dl.getAttribute('data-dl')); return; }
+    var del = e.target.closest ? e.target.closest('[data-del]') : null;
+    if(del){ removeDeck(del.getAttribute('data-del')); return; }
     var b = e.target.closest ? e.target.closest('.c') : null;
     if(!b || b.disabled) return;
     var gid = b.getAttribute('data-g'), iso = b.getAttribute('data-m'), k = gid+'|'+iso;
@@ -568,14 +625,87 @@
         return '<li><b>'+esc(g.name)+'</b><span class="r">'+esc(spanLabel(ms))
           + '<small>'+(ms.length > 1 ? 'รวม '+ms.length+' เดือนในไฟล์เดียว' : '1 เดือน')
           + (miss ? ' · ต้องดึงข้อมูลก่อน '+miss+' เดือน' : '')+'</small></span></li>'; }).join('');
-      $('askEst').textContent = need ? estimate(need).replace('ค่าใช้จ่ายประมาณการ:', 'ค่าดึงข้อมูลประมาณการ:')
-        + ' · การสร้าง PPT ไม่มีค่าใช้จ่าย' : 'การสร้าง PPT ไม่มีค่าใช้จ่าย — ใช้ข้อมูลที่ดึงไว้แล้ว';
+      fetchCost = need ? estimate(need).replace('ค่าใช้จ่ายประมาณการ:', 'ค่าดึงข้อมูลประมาณการ:') : '';
+      singleOnly = groups.every(function(g){ return g.items.length === 1; });
       $('askYes').textContent = 'ยืนยัน สร้าง PPT';
+      openPicker(groups);
     }
+    $('aiBox').hidden = which !== 'ppt';
+    if(which !== 'ppt') $('askYes').disabled = false;
     $('askMsg').textContent = '';
-    $('askYes').disabled = false;
+    if(which === 'fetch') $('askYes').disabled = false;
     $('ask').classList.add('open');
   }
+
+  /* ---- choosing the AI that summarises, with a price shown before running ---- */
+  var models = null, aiModel = '', fetchCost = '', singleOnly = false, askGroups = [], estSeq = 0;
+  var LAST_MODEL = 'ccrAiModel';
+  function perM(v){ var n = v * 1e6; return '$' + (n < 1 ? n.toFixed(2) : n < 10 ? n.toFixed(1) : Math.round(n)); }
+  function openPicker(groups){
+    askGroups = groups;
+    aiModel = singleOnly ? '' : (load(LAST_MODEL) || '');
+    $('aiFind').value = '';
+    $('aiWarn').textContent = data.openrouter ? '' :
+      'ยังไม่ได้ตั้ง OPENROUTER_API (หรือ OPENROUTER_API_KEY) บนเซิร์ฟเวอร์ — สรุปด้วย AI ไม่ได้'
+      + (singleOnly ? ' (ยังใช้บทวิเคราะห์เดิมของเดือนนั้นได้)' : '');
+    var ready = models ? Promise.resolve() : api('GET', 'models').then(function(j){ models = j.models || []; });
+    $('aiSel').innerHTML = '<option>กำลังโหลดรายชื่อโมเดล…</option>';
+    ready.then(function(){
+      if(!singleOnly && !aiModel){
+        var rec = models.filter(function(m){ return m.recommended; })[0] || models[0];
+        aiModel = rec ? rec.id : '';
+      }
+      fillModels(); priceIt();
+    })['catch'](function(err){ $('aiWarn').textContent = err.message; });
+  }
+  function fillModels(){
+    var q = $('aiFind').value.trim().toLowerCase();
+    var opt = function(m){
+      return '<option value="'+esc(m.id)+'"'+(m.id === aiModel ? ' selected' : '')+'>'
+        + esc(m.name)+' — '+perM(m.prompt)+' / '+perM(m.completion)+'</option>';
+    };
+    var hit = (models || []).filter(function(m){
+      return !q || (m.id+' '+m.name).toLowerCase().indexOf(q) > -1;
+    });
+    var rec = hit.filter(function(m){ return m.recommended; });
+    var rest = hit.filter(function(m){ return !m.recommended; });
+    var h = '';
+    if(singleOnly) h += '<option value=""'+(aiModel === '' ? ' selected' : '')
+      + '>ใช้บทวิเคราะห์เดิมของเดือนนั้น (ไม่มีค่าใช้จ่าย AI)</option>';
+    if(rec.length) h += '<optgroup label="แนะนำ">'+rec.map(opt).join('')+'</optgroup>';
+    if(rest.length) h += '<optgroup label="ทั้งหมด ('+rest.length+')">'+rest.map(opt).join('')+'</optgroup>';
+    $('aiSel').innerHTML = h || '<option disabled>ไม่พบโมเดลที่ชื่อมี “'+esc(q)+'”</option>';
+  }
+  function priceIt(){
+    var bits = [];
+    if(!aiModel){
+      $('askEst').textContent = (fetchCost ? fetchCost+' · ' : '')+'ไม่ใช้ AI สรุปใหม่ — ไม่มีค่าใช้จ่าย AI';
+      $('askYes').disabled = !singleOnly;
+      return;
+    }
+    if(!data.openrouter){ $('askYes').disabled = true; }
+    $('askEst').textContent = (fetchCost ? fetchCost+' · ' : '')+'กำลังประเมินค่า AI…';
+    var mine = ++estSeq;
+    api('POST', 'estimate', {model: aiModel, items: askGroups.map(function(g){
+      return {group: g.group, months: g.items.map(function(i){ return i.month; })};
+    })}).then(function(j){
+      if(mine !== estSeq) return;
+      var r = j.rows || [], tin = 0, tout = 0;
+      r.forEach(function(x){ tin += x.input_tokens; tout += x.output_tokens; });
+      $('askEst').textContent = (fetchCost ? fetchCost+' · ' : '')
+        + 'ค่า AI สรุป ('+shortModel(aiModel)+') ประมาณ '+(j.usd == null ? '—' : usd(j.usd))
+        + ' (เข้า ~'+Math.round(tin/1000)+'k · ออก ~'+Math.round(tout/1000)+'k token) — ค่าจริงจะบันทึกใน log';
+      $('askYes').disabled = !data.openrouter;
+    })['catch'](function(err){
+      if(mine === estSeq) $('askEst').textContent = err.message;
+    });
+  }
+  $('aiFind').addEventListener('input', fillModels);
+  $('aiSel').addEventListener('change', function(){
+    aiModel = $('aiSel').value;
+    if(aiModel) store(LAST_MODEL, aiModel);
+    priceIt();
+  });
   $('selGo').addEventListener('click', function(){ openAsk('fetch'); });
   $('selPpt').addEventListener('click', function(){ openAsk('ppt'); });
   function closeAsk(){ $('ask').classList.remove('open'); }
@@ -590,9 +720,12 @@
     }else{
       // Missing months first, then the deck: the queue runs in order.
       body = items.filter(function(i){ return !i.has; }).concat(byGroup(items).map(function(g){
-        return {group: g.group, name: g.name, kind: 'ppt',
+        return {group: g.group, name: g.name, kind: 'ppt', model: aiModel,
                 months: g.items.map(function(i){ return i.month; })};
       }));
+    }
+    if(mode === 'ppt' && !singleOnly && !aiModel){
+      $('askYes').disabled = false; $('askMsg').textContent = 'เลือกโมเดล AI ก่อน'; return;
     }
     api('POST', 'jobs', {items: body}).then(function(j){
       jobs = j.jobs || jobs; picked = {};
@@ -629,16 +762,24 @@
         det = '<div class="det">รอให้งานก่อนหน้าเสร็จ</div>';
         row = '<div class="row"><button class="mini" data-act="cancel" data-id="'+j.id+'">ยกเลิก</button></div>';
       }else if(j.status === 'running' && j.kind === 'ppt'){
-        chip = '<span class="chip running ph-ppt">กำลังสร้าง PPT</span>';
-        det = '<div class="det">'+esc(j.step||'กำลังเริ่ม')+' · '+(j.months||[]).length+' เดือน · ขั้นนี้ '+ago(j.step_at)+'</div>';
+        var aiStep = j.step === 'สรุปด้วย AI';
+        chip = '<span class="chip running '+(aiStep ? 'ph-analyse' : 'ph-ppt')+'">'
+          + (aiStep ? 'กำลังสรุปด้วย AI' : 'กำลังสร้าง PPT')+'</span>';
+        det = '<div class="det">'+esc(j.step||'กำลังเริ่ม')+(aiStep ? ' · '+esc(shortModel(j.model)) : '')
+          + ' · '+(j.months||[]).length+' เดือน · ขั้นนี้ '+ago(j.step_at)+'</div>'
+          + (j.model ? '<div class="det">ค่า AI ประมาณ '+usd(j.est_usd)+'</div>' : '');
         if(mins(j.step_at) > STUCK_MIN) row = '<div class="row"><button class="mini retry" data-act="retry" data-id="'+j.id+'">Retry</button></div>';
       }else if(j.status === 'done' && j.kind === 'ppt'){
         var dk = decks.filter(function(d){
-          return d.group_id === j.group_id && JSON.stringify(d.months) === JSON.stringify((j.months||[]).slice().sort());
+          return d.group_id === j.group_id && (d.model || '') === (j.model || '')
+            && JSON.stringify(d.months) === JSON.stringify((j.months||[]).slice().sort());
         })[0];
         chip = '<span class="chip done">Complete</span>';
-        det = '<div class="det ok-line">✓ สร้าง PPT แล้ว'+((j.months||[]).length > 1 ? ' (รวม '+j.months.length+' เดือน)' : '')+'</div>'
-          + '<div class="det">'+esc(j.note || '')+' · ไม่มีค่าใช้จ่าย</div>';
+        det = '<div class="det ok-line">✓ สร้าง PPT แล้ว'+((j.months||[]).length > 1 ? ' (สรุป '+j.months.length+' เดือน)' : '')
+          + (j.model ? ' · AI: '+esc(shortModel(j.model)) : '')+'</div>'
+          + '<div class="det">'+esc(j.note || '')+'</div>'
+          + '<div class="det">'+(j.model ? 'ค่า AI จริง <b>'+usd(j.cost_usd)+'</b> (ประมาณไว้ '+usd(j.est_usd)+')'
+            : 'ไม่มีค่าใช้จ่าย')+'</div>';
         row = dk ? '<div class="row"><button class="mini" data-act="download" data-id="'+dk.id+'">⬇ ดาวน์โหลด</button></div>' : '';
         x = '<button class="x" data-act="dismiss" data-id="'+j.id+'" title="ซ่อน">×</button>';
       }else if(j.status === 'running'){
@@ -712,6 +853,28 @@
     })['catch'](function(err){ alert(err.message); });
   }
 
+  /* ---------------- AI cost log ---------------- */
+  function loadLog(){
+    api('GET', 'ailog').then(function(j){
+      var rows = j.log || [], total = 0;
+      rows.forEach(function(r){ total += r.cost_usd || 0; });
+      $('logSum').textContent = rows.length ? rows.length+' ครั้ง · รวม '+usd(total) : 'ยังไม่มี';
+      if(!rows.length){ $('logBody').innerHTML = '<div class="empty">ยังไม่มีการสรุปด้วย AI</div>'; return; }
+      var names = {}; (data.groups || []).forEach(function(g){ names[g.id] = g.name; });
+      $('logBody').innerHTML = '<table><thead><tr><th>เวลา</th><th>กลุ่ม</th><th>ช่วง</th><th>โมเดล</th>'
+        + '<th class="n">ประมาณ</th><th class="n">จริง</th><th class="n">token เข้า / ออก</th><th>ผล</th></tr></thead><tbody>'
+        + rows.map(function(r){
+          var t = new Date(r.created_at);
+          return '<tr><td>'+esc(t.toLocaleString('th-TH', {dateStyle:'short', timeStyle:'short'}))+'</td>'
+            + '<td>'+esc(names[r.group_id] || r.group_id)+'</td><td>'+esc(spanLabel(r.months || []))+'</td>'
+            + '<td>'+esc(r.model)+'</td><td class="n">'+usd(r.est_usd)+'</td><td class="n"><b>'+usd(r.cost_usd)+'</b></td>'
+            + '<td class="n">'+(r.input_tokens == null ? '—' : r.input_tokens.toLocaleString()+' / '+r.output_tokens.toLocaleString())+'</td>'
+            + '<td'+(r.ok ? '' : ' class="bad"')+'>'+(r.ok ? '✓ สำเร็จ' : '✕ '+esc(r.detail))+'</td></tr>';
+        }).join('')+'</tbody></table>';
+    })['catch'](function(){});
+  }
+  $('logBox').addEventListener('toggle', function(){ if($('logBox').open) loadLog(); });
+
   /* ---------------- polling ---------------- */
   function schedule(ms){
     clearTimeout(timer);
@@ -726,7 +889,7 @@
       jobs = j.jobs || []; decks = j.decks || decks; avg = j.average_cost;
       // A job that just finished changes which months exist: reload the grid's data.
       var finished = jobs.some(function(x){ return x.status === 'done' && before[x.id] && before[x.id] !== 'done'; });
-      if(finished) return start();
+      if(finished){ if($('logBox').open) loadLog(); return start(); }
       grid(); tray(); schedule();
     })['catch'](function(){ schedule(10000); });
   }

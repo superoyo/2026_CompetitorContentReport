@@ -22,6 +22,10 @@ at again later — Railway's filesystem does not survive a deploy.
     POST /api/admin/jobs           queue [{group, month}] to fetch
     POST /api/admin/jobs/<id>/retry|cancel|dismiss
     GET  /api/admin/decks/<id>     download a PPT built from the admin page
+    POST /api/admin/decks/<id>/delete
+    GET  /api/admin/models         OpenRouter models and their prices
+    POST /api/admin/estimate       what an AI summary of these months would cost
+    GET  /api/admin/ailog          every AI summary run, estimate vs actual
 
 The Apify token stays server-side: it is read from $APIFY_TOKEN and never
 reaches the page. Because the site is public, the refresh endpoint is gated on
@@ -34,17 +38,18 @@ Environment:
     DATABASE_URL        Postgres; without it, fetched months die with the box
     AGENCY_API_BASE     Agency Intelligence, for the group and brand lists
     AGENCY_SERVICE_KEY  its REPORT_SERVICE_KEY
+    OPENROUTER_API      for the AI summary of a multi-month PPT (or OPENROUTER_API_KEY)
     ADMIN_PASSWORD      what the admin page asks for (default "content")
 
 Run locally:
     APIFY_TOKEN=apify_api_xxx REFRESH_KEY=letmein python3 server.py
 """
-import base64
 import functools
 import hmac
 import http.server
 import json
 import os
+import shutil
 import socketserver
 import subprocess
 import sys
@@ -53,9 +58,12 @@ import time
 import urllib.parse
 
 import agency_api
+import analyse_period
 import brandset
 import dashboard_data
 import month_util
+import openrouter
+import period
 import store
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -258,23 +266,7 @@ def deck_shim(group, month):
 
     # One folder per month: a deck of several months writes each month's
     # images before rendering any of them, and the file names repeat.
-    img_dir = os.path.join(DECK_IMAGES, month)
-    os.makedirs(img_dir, exist_ok=True)
-    for key, posts in (proc.get("top5") or {}).items():
-        safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in key)
-        for i, post in enumerate(posts, 1):
-            post["image_path"] = None
-            uri = post.get("img") or ""
-            if not uri.startswith("data:image"):
-                continue
-            try:
-                raw = base64.b64decode(uri.split(",", 1)[1])
-            except Exception:
-                continue
-            fp = os.path.join(img_dir, "%s_%d.jpg" % (safe, i))
-            with open(fp, "wb") as f:
-                f.write(raw)
-            post["image_path"] = fp
+    period.write_images(proc.get("top5"), os.path.join(DECK_IMAGES, month))
 
     # Commentary written for this very month travels with it. Hand-written
     # prose does not: build_slides.py gates that on AUTHORED_MONTH itself, and
@@ -471,8 +463,9 @@ def run_pipeline(group, month, brands, job_id=None):
 
 # ---------------------------------------------------------------- admin queue
 
-def deck_filename(name, months):
-    """e.g. PAO_Aug-Oct_2026_Engagement.pptx — readable once it is downloaded."""
+def deck_filename(name, months, model_label):
+    """e.g. Systema_Jul-Sep_2026_claude-sonnet-5.5.pptx — says what it covers
+    and which AI wrote it, once it is sitting in someone's Downloads."""
     safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in (name or "group")).strip("_")
     a, b = month_util.info(months[0]), month_util.info(months[-1])
     if len(months) == 1:
@@ -481,35 +474,118 @@ def deck_filename(name, months):
         span = "%s-%s_%d" % (a["en_full"][:3], b["en_full"][:3], a["year"])
     else:
         span = "%s_%d-%s_%d" % (a["en_full"][:3], a["year"], b["en_full"][:3], b["year"])
-    return "%s_%s_Engagement.pptx" % (safe or "group", span)
+    return "%s_%s_%s.pptx" % (safe or "group", span, model_label or "no-ai")
+
+
+def _owned(group):
+    try:
+        return {b["key"] for b in agency_api.brands(group) if b.get("owned")}
+    except agency_api.AgencyError:
+        return set()
+
+
+def estimate_summary(group, months, model):
+    """What summarising these months with `model` should cost, before running it.
+
+    Measured on the prompt the run would actually send. Months not fetched yet
+    are left out: the brief is totals plus five posts per page, so its size
+    hardly grows with the number of months.
+    """
+    payloads = {}
+    for m in months:
+        saved = store.load_report(group, m)
+        if saved:
+            payloads[m] = saved["payload"]
+    if payloads:
+        P = period.combine(group, payloads, ())
+        P["period"] = period.labels(months)
+        system, user = analyse_period.prompt(P)
+        chars, n = len(system) + len(user), len(P["brands"])
+    else:
+        n = 6
+        chars = len(analyse_period.analyse.SYSTEM) + 2500 * n
+    est = openrouter.estimate(chars, n, model)
+    est.update(group=group, months=months, model=model, have=len(payloads))
+    return est
 
 
 def run_deck(job):
-    """Build one PPT from the job's months (already stored) and keep it."""
+    """Build one PPT from the job's months (already stored) and keep it.
+
+    One month and no model picked: the month's own commentary goes in as is.
+    Otherwise the months are folded into one report (period.py) and the
+    chosen OpenRouter model writes a fresh summary of the whole span.
+    """
     job_id, group = job["id"], job["group_id"]
     months = sorted(job.get("months") or [job["month"]])
+    model = (job.get("model") or "").strip()
     out = "/tmp/ccr_deck_out_%d.pptx" % job_id
-    shims = []
+    work = "/tmp/ccr_deck_src_%d.json" % job_id
+    img_dir = os.path.join(DECK_IMAGES, "job_%d" % job_id)
+    cost, logged = None, False
     try:
         with JOB_LOCK:
             JOB["step"] = "สร้าง PPT"
         store.update_job(job_id, step="เตรียมข้อมูล", step_at=True)
-        missing = [m for m in months if not store.load_report(group, m)]
+        payloads = {}
+        for m in months:
+            saved = store.load_report(group, m)
+            if saved:
+                payloads[m] = saved["payload"]
+        missing = [m for m in months if m not in payloads]
         if missing:
             raise RuntimeError("ยังไม่มีข้อมูลเดือน %s — ดึงข้อมูลก่อนแล้วกด Retry"
                                % ", ".join(missing))
-        sources = []
-        for m in months:
-            path = deck_shim(group, m)
-            shims.append(path)
-            sources.append({"month": m, "processed": path})
+        if len(months) > 1 and not model:
+            raise RuntimeError("PPT หลายเดือนต้องเลือกโมเดล AI สำหรับสรุป")
+
+        if not model:
+            source = deck_shim(group, months[0])
+            P = json.load(open(source, encoding="utf-8"))
+            os.replace(source, work)
+            label = "claude" if P.get("analysis") else "no-ai"
+        else:
+            P = period.combine(group, payloads, _owned(group))
+            period.write_images(P["top5"], img_dir)
+            with open(work, "w", encoding="utf-8") as f:
+                json.dump(P, f, ensure_ascii=False)
+
+            store.update_job(job_id, step="สรุปด้วย AI", step_at=True)
+            _log("=== สรุป %s · %s ด้วย %s (ประมาณ $%s) ===" % (
+                group, ", ".join(months), model, job.get("est_usd")))
+            code, text, err = _run_step(
+                "analyse_period.py",
+                dict(os.environ, PROCESSED_JSON=work, OPENROUTER_MODEL=model,
+                     PYTHONUNBUFFERED="1"), timeout=1200)
+            for line in text.splitlines()[-15:]:
+                _log(line)
+            costs, tokens, used = {}, (None, None), model
+            _costs(text, costs, "openrouter")
+            for line in text.splitlines():
+                if line.startswith("TOKENS "):
+                    bits = line.split()
+                    tokens = (int(bits[1]), int(bits[2]))
+                elif line.startswith("MODEL_USED "):
+                    used = line.split(None, 1)[1].strip()
+            cost = costs.get("openrouter")
+            why = _analysis_skipped(text) if code == 0 else explain(err)
+            store.add_ai_log(job_id=job_id, group_id=group, months=months, model=used,
+                             est_usd=job.get("est_usd"), cost_usd=cost,
+                             input_tokens=tokens[0], output_tokens=tokens[1],
+                             ok=why is None, detail=why or "")
+            logged = True
+            if job_id in RESTART:
+                raise RuntimeError("ยกเลิกเพื่อเริ่มใหม่")
+            if why:
+                raise RuntimeError("AI สรุปไม่สำเร็จ — %s" % why)
+            label = openrouter.short_name(model)
 
         store.update_job(job_id, step="สร้าง PPT", step_at=True)
         _log("=== สร้าง PPT %s · %s ===" % (group, ", ".join(months)))
         code, out_text, err = _run_step(
             "build_deck_multi.py",
-            dict(os.environ, DECK_SOURCES=json.dumps(sources), DECK_OUT=out,
-                 PYTHONUNBUFFERED="1"), timeout=900)
+            dict(os.environ, DECK_SOURCES=json.dumps([{"month": months[-1], "processed": work}]),
+                 DECK_OUT=out, PYTHONUNBUFFERED="1"), timeout=900)
         for line in out_text.splitlines()[-10:]:
             _log(line)
         if job_id in RESTART:
@@ -520,11 +596,13 @@ def run_deck(job):
         store.update_job(job_id, step="บันทึกไฟล์", step_at=True)
         with open(out, "rb") as f:
             data = f.read()
-        name = deck_filename(job.get("group_name") or group, months)
-        store.save_deck(group, months, name, data)
+        name = deck_filename(job.get("group_name") or group, months, label)
+        store.save_deck(group, months, name, data, model=model)
         store.update_job(job_id, status="done", step="เสร็จสมบูรณ์", error="",
                          note="%s · %.1f MB" % (name, len(data) / 1048576.0),
-                         cost_usd=0, cost_detail={}, finished_at=True)
+                         cost_usd=round(cost, 4) if cost is not None else (None if model else 0),
+                         cost_detail={"openrouter": cost} if cost is not None else {},
+                         finished_at=True)
     except Exception as exc:
         _log("ERROR: %s" % exc)
         if job_id in RESTART:
@@ -532,13 +610,19 @@ def run_deck(job):
             store.update_job(job_id, status="queued", step="", error="",
                              started_at=None, step_at=None, finished_at=None)
         else:
-            store.update_job(job_id, status="failed", error=str(exc), finished_at=True)
+            store.update_job(job_id, status="failed", error=str(exc), finished_at=True,
+                             cost_usd=round(cost, 4) if cost is not None else None,
+                             cost_detail={"openrouter": cost} if cost is not None else {})
+        if model and not logged:
+            store.add_ai_log(job_id=job_id, group_id=group, months=months, model=model,
+                             est_usd=job.get("est_usd"), ok=False, detail=str(exc))
     finally:
-        for path in shims + [out]:
+        for path in (out, work):
             try:
                 os.remove(path)
-            except (OSError, TypeError):
+            except OSError:
                 pass
+        shutil.rmtree(img_dir, ignore_errors=True)
         with JOB_LOCK:
             JOB["running"] = False
             JOB["last_finished"] = time.strftime("%Y-%m-%d %H:%M")
@@ -618,6 +702,7 @@ def admin_overview():
         "current_month": month_util.info(time.strftime("%Y-%m"))["iso"],
         "configured": bool(APIFY_TOKEN),
         "analysis": bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHOPIC_KEY")),
+        "openrouter": openrouter.configured(),
         "durable": store.available(),
         "storage_note": store.why_unavailable(),
         "average_cost": store.average_cost(),
@@ -851,6 +936,15 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 self._json(200, {"jobs": store.list_jobs(),
                                  "decks": store.list_decks(),
                                  "average_cost": store.average_cost()}); return
+            if route == "/api/admin/models":
+                try:
+                    self._json(200, {"models": openrouter.models(),
+                                     "configured": openrouter.configured()})
+                except Exception as exc:
+                    self._json(502, {"error": "ดึงรายชื่อโมเดลจาก OpenRouter ไม่ได้ — %s" % exc})
+                return
+            if route == "/api/admin/ailog":
+                self._json(200, {"log": store.ai_log()}); return
             if route.startswith("/api/admin/decks/"):
                 try:
                     got = store.load_deck(int(route.rsplit("/", 1)[1]))
@@ -1068,12 +1162,22 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     if kind == "fetch" and not APIFY_TOKEN:
                         raise ValueError("ยังไม่ได้ตั้งค่า APIFY_TOKEN บนเซิร์ฟเวอร์")
                     months = []
+                    model, est = "", None
                     if kind == "ppt":
                         months = sorted({str(m).strip() for m in it.get("months") or []})
                         if not months:
                             raise ValueError("ต้องเลือกอย่างน้อยหนึ่งเดือน")
                         for m in months:
                             month_util.parse(m)
+                        model = str(it.get("model") or "").strip()
+                        if len(months) > 1 and not model:
+                            raise ValueError("PPT หลายเดือนต้องเลือกโมเดล AI สำหรับสรุป")
+                        if model:
+                            if not openrouter.configured():
+                                raise ValueError("ยังไม่ได้ตั้ง OPENROUTER_API (หรือ OPENROUTER_API_KEY) บนเซิร์ฟเวอร์")
+                            if not openrouter.find(model):
+                                raise ValueError("ไม่พบโมเดล %s ใน OpenRouter" % model)
+                            est = estimate_summary(str(it.get("group") or ""), months, model)["usd"]
                         it = dict(it, month=months[0])
                     month = str(it.get("month") or "").strip()
                     month_util.parse(month)
@@ -1084,7 +1188,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                         raise ValueError("ยังไม่มีข้อมูลเดือน %s ของกลุ่มนี้ — ต้องดึงข้อมูลก่อน" % month)
                     if group:
                         items.append({"group_id": group, "month": month, "kind": kind,
-                                      "months": months,
+                                      "months": months, "model": model, "est_usd": est,
                                       "group_name": str(it.get("name") or "")[:200]})
             except ValueError as exc:
                 self._json(400, {"error": str(exc)}); return
@@ -1096,6 +1200,27 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             WAKE.set()
             self._json(202, {"added": len(added), "skipped": len(items) - len(added),
                              "jobs": store.list_jobs()})
+            return
+
+        if route == "/api/admin/estimate":
+            try:
+                body = self._body()
+                model = str(body.get("model") or "").strip()
+                rows = [estimate_summary(str(it.get("group") or ""),
+                                         sorted(it.get("months") or []), model)
+                        for it in body.get("items") or []]
+            except Exception as exc:
+                self._json(400, {"error": "ประเมินราคาไม่ได้ — %s" % exc}); return
+            known = [r["usd"] for r in rows if r["usd"] is not None]
+            self._json(200, {"rows": rows, "usd": round(sum(known), 4) if known else None})
+            return
+
+        if route.startswith("/api/admin/decks/") and route.endswith("/delete"):
+            try:
+                store.delete_deck(int(route.split("/")[4]))
+            except (ValueError, IndexError):
+                self._json(400, {"error": "deck id ไม่ถูกต้อง"}); return
+            self._json(200, {"decks": store.list_decks()})
             return
 
         parts = route.split("/")        # ['', 'api', 'admin', 'jobs', '<id>', '<action>']

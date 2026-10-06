@@ -67,6 +67,13 @@ ANALYSIS = (_GEN.get('ai') or {}) if _GEN else (
 # month it was written about.
 SUMMARY = (_GEN.get('summary') or {}) if _GEN else (
     AUTHORED_SUMMARY if M['iso'] == report_config.AUTHORED_MONTH else {})
+# A deck covering several months (period.py) carries `period`: the slides
+# then speak of the span instead of a month, and a trend slide is added.
+PERIOD = P.get('period')
+SPAN = PERIOD['th'] if PERIOD else "%s %d" % (M["th_full"], M["be_year"])
+IN_SPAN = ("ช่วง" + SPAN) if PERIOD else ("เดือน" + SPAN)
+EN_SPAN = PERIOD['en'] if PERIOD else M["en_label"]
+AI_MODEL = (_GEN or {}).get('model') if PERIOD else None
 NAME = {b['key']: b['name'] for b in BRANDS}
 LETTER = {b['key']: b['letter'] for b in BRANDS}
 COLOR = {b['key']: b['color'] for b in BRANDS}
@@ -179,7 +186,7 @@ add_ring(s, 13.7, -0.3, 2.6, RING, 1.6); add_ring(s, 13.0, 0.7, 1.1, RING, 1.6);
 add_rect(s, 1.0, 2.05, 0.9, 0.09, fill=ACCENT)
 add_text(s, 1.0, 2.25, 11.3, 0.5, "รายงานสรุป Engagement บน Facebook", size=19, color=hx('#9FC9DE'), bold=True, font=HEAD_FONT)
 add_text(s, 1.0, 2.72, 11.5, 1.3, "Top 5 คอนเทนต์ยอด Engagement สูงสุด", size=42, color=WHITE, bold=True, font=HEAD_FONT)
-add_text(s, 1.0, 3.7, 11.3, 0.6, "ประจำเดือน%s %d  (%s)  ·  %d เพจ" % (M["th_full"], M["be_year"], M["en_label"], len(BRANDS)), size=19, color=hx('#CFE7F0'), font=HEAD_FONT)
+add_text(s, 1.0, 3.7, 11.3, 0.6, "ประจำ%s  (%s)  ·  %d เพจ" % (IN_SPAN, EN_SPAN, len(BRANDS)), size=19, color=hx('#CFE7F0'), font=HEAD_FONT)
 
 bx, by = 1.0, 4.75
 for key in [b['key'] for b in BRANDS]:
@@ -187,12 +194,13 @@ for key in [b['key'] for b in BRANDS]:
     add_text(s, bx - 0.62, by + 0.56, 1.74, 0.5, NAME[key].replace(' Thailand', ''), size=10.5,
              color=hx('#CFE7F0'), align=PP_ALIGN.CENTER, wrap=True, font=BODY_FONT)
     bx += 1.5
-add_text(s, 1.0, 6.9, 9.0, 0.4, "ข้อมูลจากโพสต์สาธารณะบนเพจ Facebook · ดึงผ่าน Apify", size=11, color=hx('#7C9CB0'))
+add_text(s, 1.0, 6.9, 11.0, 0.4, "ข้อมูลจากโพสต์สาธารณะบนเพจ Facebook · ดึงผ่าน Apify"
+         + (" · สรุปและข้อเสนอแนะโดย AI: %s" % AI_MODEL if AI_MODEL else ""), size=11, color=hx('#7C9CB0'))
 
 # ============ Slide 2: Overview ============
 s = add_slide(); set_bg(s, WHITE)
-add_text(s, 0.6, 0.42, 10, 0.6, "ภาพรวม Engagement เดือน%s %d" % (M["th_full"], M["be_year"]), size=27, color=hx('#0B2545'), bold=True, font=HEAD_FONT)
-add_text(s, 0.6, 1.0, 10, 0.4, "เปรียบเทียบยอด Engagement รวม (Likes + Comments + Shares) ทั้ง 8 เพจ", size=13, color=MUTED)
+add_text(s, 0.6, 0.42, 10, 0.6, "ภาพรวม Engagement " + IN_SPAN, size=27, color=hx('#0B2545'), bold=True, font=HEAD_FONT)
+add_text(s, 0.6, 1.0, 10, 0.4, "เปรียบเทียบยอด Engagement รวม (Likes + Comments + Shares) ทั้ง %d เพจ" % len(ORDER), size=13, color=MUTED)
 
 grand = sum(AGG[k]['total'] for k in AGG)
 posts = sum(AGG[k]['posts'] for k in AGG)
@@ -229,6 +237,32 @@ for rank, key in enumerate(ORDER, 1):
     ry += rh + rgap
 add_text(s, 0.6, 6.95, 11.5, 0.35, "Engagement = Likes/Reactions + Comments + Shares (ข้อมูลจากโพสต์สาธารณะ)", size=10, color=MUTED, italic=True)
 
+# ============ Trend across the period ============
+if PERIOD and P.get('monthly'):
+    s = add_slide(); set_bg(s, WHITE)
+    add_text(s, 0.6, 0.42, 12, 0.6, "แนวโน้ม Engagement รายเดือน", size=27, color=hx('#0B2545'), bold=True, font=HEAD_FONT)
+    add_text(s, 0.6, 1.0, 12, 0.4, "ยอด Engagement รวมของแต่ละเพจในแต่ละเดือน — " + SPAN, size=13, color=MUTED)
+    months = PERIOD['months']
+    cd = CategoryChartData()
+    cd.categories = ["%s %d" % (month_util.TH_ABBR[int(m[5:7]) - 1], (int(m[:4]) + 543) % 100) for m in months]
+    for key in ORDER:
+        by = {r['month']: r['total'] for r in P['monthly'].get(key) or []}
+        cd.add_series(NAME[key].replace(' Thailand', ''), [by.get(m, 0) for m in months])
+    gf = s.shapes.add_chart(XL_CHART_TYPE.LINE_MARKERS, Inches(0.6), Inches(1.6), Inches(12.1), Inches(5.3), cd)
+    ch = gf.chart; ch.has_title = False
+    ch.has_legend = True; ch.legend.include_in_layout = False
+    ch.legend.position = 2  # bottom
+    ch.legend.font.size = Pt(10.5); ch.legend.font.name = BODY_FONT
+    for key, ser in zip(ORDER, ch.plots[0].series):
+        ser.smooth = False
+        ser.format.line.color.rgb = hx(COLOR[key]); ser.format.line.width = Pt(2.5)
+        ser.marker.format.fill.solid(); ser.marker.format.fill.fore_color.rgb = hx(COLOR[key])
+        ser.marker.format.line.color.rgb = hx(COLOR[key])
+    ca = ch.category_axis; ca.tick_labels.font.size = Pt(11); ca.tick_labels.font.name = BODY_FONT
+    va = ch.value_axis; va.tick_labels.font.size = Pt(10); va.tick_labels.number_format = '#,##0'
+    va.tick_labels.number_format_is_linked = False
+    va.major_gridlines.format.line.color.rgb = hx('#E5EAF0')
+
 # ============ per-brand Top5 + Analysis ============
 CARD_W, CARD_GAP, IMG_H, X0, CARD_TOP = 2.15, 0.35, 2.62, 0.6, 1.62
 
@@ -238,7 +272,7 @@ for key in ORDER:
     s = add_slide(); set_bg(s, WHITE)
     add_badge(s, 0.6, 0.42, 0.55, c, LETTER[key], fs=20)
     add_text(s, 1.32, 0.4, 8.6, 0.5, display, size=24, color=hx('#0B2545'), bold=True, font=HEAD_FONT)
-    add_text(s, 1.32, 0.92, 8.6, 0.4, "Top 5 คอนเทนต์ Engagement สูงสุด — %s %d" % (M["th_full"], M["be_year"]), size=12.5, color=MUTED)
+    add_text(s, 1.32, 0.92, 8.6, 0.4, "Top 5 คอนเทนต์ Engagement สูงสุด — " + SPAN, size=12.5, color=MUTED)
     add_rect(s, 10.45, 0.35, 2.3, 1.05, fill=tint(COLOR[key], 0.86), radius=0.16, shadow=True)
     add_text(s, 10.45, 0.46, 2.3, 0.46, fmt(v['total']), size=22, color=c, bold=True, align=PP_ALIGN.CENTER, font=HEAD_FONT)
     add_text(s, 10.45, 0.94, 2.3, 0.34, f"Total Engagement · {v['posts']} โพสต์", size=9, color=MUTED, align=PP_ALIGN.CENTER)
@@ -286,13 +320,13 @@ for key in ORDER:
         add_badge(s, 0.6, 0.5, 0.55, c, LETTER[key], fs=20)
         add_text(s, 1.32, 0.46, 9.5, 0.5, display, size=23, color=WHITE, bold=True, font=HEAD_FONT)
         add_text(s, 1.32, 0.98, 10.5, 0.4,
-                 "ภาพรวมคอนเทนต์ทั้งเดือน%s %d" % (M['th_full'], M['be_year']),
+                 "ภาพรวมคอนเทนต์ทั้ง" + IN_SPAN,
                  size=12, color=hx('#9FC9DE'))
 
         add_rect(s, 0.6, 1.75, 12.13, 3.15, fill=PANEL, radius=0.05,
                  line_color=hx('#26507A'), line_w=1.25)
         add_rect(s, 0.6, 1.75, 0.12, 3.15, fill=hx('#38BDF8'))
-        add_text(s, 0.95, 2.05, 11.5, 0.4, "🗂  คอนเทนต์เดือนนี้เป็นอย่างไร",
+        add_text(s, 0.95, 2.05, 11.5, 0.4, "🗂  คอนเทนต์%sเป็นอย่างไร" % ("ช่วงนี้" if PERIOD else "เดือนนี้"),
                  size=15, color=hx('#7DD3FC'), bold=True, font=HEAD_FONT)
         # python-pptx will not shrink text to fit, and the panel ends at 4.90":
         # cap the paragraph so an unusually long overview cannot run past it.
@@ -329,7 +363,7 @@ for key in ORDER:
     s = add_slide(); set_bg(s, DARK)
     add_badge(s, 0.6, 0.5, 0.55, c, LETTER[key], fs=20)
     add_text(s, 1.32, 0.46, 9.5, 0.5, display, size=23, color=WHITE, bold=True, font=HEAD_FONT)
-    add_text(s, 1.32, 0.98, 10.5, 0.4, f"บทวิเคราะห์คอนเทนต์ & ข้อเสนอแนะเดือนถัดไป — วิเคราะห์จาก {v['posts']} โพสต์ในเดือน{M['th_full']}",
+    add_text(s, 1.32, 0.98, 10.5, 0.4, f"บทวิเคราะห์คอนเทนต์ & ข้อเสนอแนะ{'ช่วง' if PERIOD else 'เดือน'}ถัดไป — วิเคราะห์จาก {v['posts']} โพสต์ใน{IN_SPAN}",
              size=12, color=hx('#9FC9DE'))
     # chips
     chx = 0.6
@@ -371,8 +405,9 @@ add_rect(s, 1.0, 1.72, 0.75, 0.06, fill=ACCENT)
 notes = [
     "ข้อมูลดึงจากโพสต์สาธารณะบนเพจ Facebook ผ่านเครื่องมือสแครปข้อมูล (Apify) ไม่ใช่ตัวเลขจาก Facebook Page Insights โดยตรง",
     "Engagement นับจาก Likes/Reactions + Comments + Shares ของแต่ละโพสต์ ไม่รวม Reach, Impressions หรือ Click ซึ่งดูได้จาก Insights เท่านั้น",
-    "ช่วงข้อมูล: 1–%d %s %d (%s) · จำนวนโพสต์ที่ดึงได้ต่อเพจอาจต่างกันตามความถี่การโพสต์จริง"
-    % (M["days"], M["th_full"], M["be_year"], M["en_label"]),
+    ("ช่วงข้อมูล: %s (%s · %d เดือน รวมกัน)" % (PERIOD["dates"], EN_SPAN, PERIOD["n"]) if PERIOD else
+     "ช่วงข้อมูล: 1–%d %s %d (%s)" % (M["days"], M["th_full"], M["be_year"], M["en_label"]))
+    + " · จำนวนโพสต์ที่ดึงได้ต่อเพจอาจต่างกันตามความถี่การโพสต์จริง",
     "เพจที่มีจำนวนโพสต์น้อย ตัวเลขจึงสะท้อนช่วงตัวอย่างที่จำกัด",
 ]
 y = 2.25

@@ -21,6 +21,8 @@ with the container in production — the API says so rather than pretending.
     ccr_decks      PPT files built from the admin page, one or several months
                    each, so they can be downloaded after the box that built
                    them is gone
+    ccr_ai_log     every AI summary run from the admin page: model, the
+                   estimate shown beforehand, and what it actually cost
 """
 import datetime
 import json
@@ -129,6 +131,23 @@ CREATE TABLE IF NOT EXISTS ccr_decks (
   size       INTEGER NOT NULL,
   data       BYTEA NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+ALTER TABLE ccr_decks ADD COLUMN IF NOT EXISTS model TEXT NOT NULL DEFAULT '';
+ALTER TABLE ccr_jobs ADD COLUMN IF NOT EXISTS model TEXT NOT NULL DEFAULT '';
+ALTER TABLE ccr_jobs ADD COLUMN IF NOT EXISTS est_usd DOUBLE PRECISION;
+CREATE TABLE IF NOT EXISTS ccr_ai_log (
+  id            BIGSERIAL PRIMARY KEY,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  job_id        BIGINT,
+  group_id      TEXT NOT NULL,
+  months        JSONB NOT NULL DEFAULT '[]'::jsonb,
+  model         TEXT NOT NULL,
+  est_usd       DOUBLE PRECISION,
+  cost_usd      DOUBLE PRECISION,
+  input_tokens  INTEGER,
+  output_tokens INTEGER,
+  ok            BOOLEAN NOT NULL,
+  detail        TEXT NOT NULL DEFAULT ''
 );
 """
 
@@ -348,7 +367,7 @@ def load_selection(group_id):
 
 JOB_COLS = ("id", "group_id", "group_name", "month", "status", "step", "error",
             "cost_usd", "cost_detail", "dismissed", "created_at", "started_at",
-            "step_at", "finished_at", "kind", "note", "months")
+            "step_at", "finished_at", "kind", "note", "months", "model", "est_usd")
 _TIMES = ("created_at", "started_at", "step_at", "finished_at")
 
 
@@ -382,16 +401,19 @@ def add_jobs(items):
                     kind, months = it.get("kind") or "fetch", it.get("months") or []
                     busy = con.execute(
                         "SELECT 1 FROM ccr_jobs WHERE group_id = %s AND month = %s "
-                        "AND kind = %s AND months = %s::jsonb "
+                        "AND kind = %s AND months = %s::jsonb AND model = %s "
                         "AND status IN ('queued', 'running')",
-                        (it["group_id"], it["month"], kind, json.dumps(months))).fetchone()
+                        (it["group_id"], it["month"], kind, json.dumps(months),
+                         it.get("model") or "")).fetchone()
                     if busy:
                         continue
                     row = con.execute(
-                        "INSERT INTO ccr_jobs (group_id, group_name, month, kind, months) "
-                        "VALUES (%s, %s, %s, %s, %s::jsonb) RETURNING " + _sql_cols(),
+                        "INSERT INTO ccr_jobs (group_id, group_name, month, kind, months, "
+                        "model, est_usd) VALUES (%s, %s, %s, %s, %s::jsonb, %s, %s) "
+                        "RETURNING " + _sql_cols(),
                         (it["group_id"], it.get("group_name") or "", it["month"],
-                         kind, json.dumps(months))).fetchone()
+                         kind, json.dumps(months), it.get("model") or "",
+                         it.get("est_usd"))).fetchone()
                     added.append(_job_row(row))
             return added
         except Exception as exc:
@@ -403,6 +425,7 @@ def add_jobs(items):
             kind, months = it.get("kind") or "fetch", it.get("months") or []
             if any(j["group_id"] == it["group_id"] and j["month"] == it["month"]
                    and (j.get("kind") or "fetch") == kind and (j.get("months") or []) == months
+                   and (j.get("model") or "") == (it.get("model") or "")
                    and j["status"] in ("queued", "running") for j in jobs):
                 continue
             blob["job_seq"] = blob.get("job_seq", 0) + 1
@@ -411,6 +434,7 @@ def add_jobs(items):
                        group_name=it.get("group_name") or "", month=it["month"],
                        status="queued", step="", error="", cost_detail={},
                        kind=kind, months=months, note="",
+                       model=it.get("model") or "", est_usd=it.get("est_usd"),
                        dismissed=False, created_at=_now())
             jobs.append(job)
             added.append(dict(job))
@@ -568,31 +592,35 @@ def average_cost(limit=20):
 DECK_DIR = FALLBACK + ".decks"
 
 
-def save_deck(group_id, months, filename, data):
-    """Keep a built PPT. One deck per (group, months): rebuilding replaces it."""
+def save_deck(group_id, months, filename, data, model=""):
+    """Keep a built PPT. One deck per (group, months, model): rebuilding the
+    same one replaces it; the same months summarised by another model is a
+    second deck, so the two can be compared."""
     months = sorted(months)
     if available():
         try:
             with _connect() as con:
-                con.execute("DELETE FROM ccr_decks WHERE group_id = %s AND months = %s::jsonb",
-                            (group_id, json.dumps(months)))
+                con.execute("DELETE FROM ccr_decks WHERE group_id = %s AND months = %s::jsonb "
+                            "AND model = %s", (group_id, json.dumps(months), model))
                 row = con.execute(
-                    "INSERT INTO ccr_decks (group_id, months, filename, size, data) "
-                    "VALUES (%s, %s::jsonb, %s, %s, %s) RETURNING id",
-                    (group_id, json.dumps(months), filename, len(data), data)).fetchone()
+                    "INSERT INTO ccr_decks (group_id, months, filename, size, data, model) "
+                    "VALUES (%s, %s::jsonb, %s, %s, %s, %s) RETURNING id",
+                    (group_id, json.dumps(months), filename, len(data), data, model)).fetchone()
             return row[0]
         except Exception as exc:
             _degrade(exc)
     with _LOCK:
         blob = _file()
         decks = [d for d in blob.get("decks", [])
-                 if not (d["group_id"] == group_id and d["months"] == months)]
+                 if not (d["group_id"] == group_id and d["months"] == months
+                         and d.get("model", "") == model)]
         blob["deck_seq"] = blob.get("deck_seq", 0) + 1
         os.makedirs(DECK_DIR, exist_ok=True)
         with open(os.path.join(DECK_DIR, "%d.pptx" % blob["deck_seq"]), "wb") as f:
             f.write(data)
         decks.append({"id": blob["deck_seq"], "group_id": group_id, "months": months,
-                      "filename": filename, "size": len(data), "created_at": _now()})
+                      "filename": filename, "size": len(data), "created_at": _now(),
+                      "model": model})
         blob["decks"] = decks
         _write_file(blob)
         return blob["deck_seq"]
@@ -603,11 +631,11 @@ def list_decks():
     if available():
         try:
             with _connect() as con:
-                rows = con.execute("SELECT id, group_id, months, filename, size, created_at "
-                                   "FROM ccr_decks ORDER BY id").fetchall()
+                rows = con.execute("SELECT id, group_id, months, filename, size, created_at, "
+                                   "model FROM ccr_decks ORDER BY id").fetchall()
             return [{"id": r[0], "group_id": r[1], "months": r[2], "filename": r[3],
-                     "size": r[4], "created_at": r[5].isoformat(timespec="seconds")}
-                    for r in rows]
+                     "size": r[4], "created_at": r[5].isoformat(timespec="seconds"),
+                     "model": r[6]} for r in rows]
         except Exception as exc:
             _degrade(exc)
     return _file().get("decks", [])
@@ -631,3 +659,68 @@ def load_deck(deck_id):
             except OSError:
                 return None
     return None
+
+
+def delete_deck(deck_id):
+    if available():
+        try:
+            with _connect() as con:
+                con.execute("DELETE FROM ccr_decks WHERE id = %s", (deck_id,))
+            return
+        except Exception as exc:
+            _degrade(exc)
+    with _LOCK:
+        blob = _file()
+        blob["decks"] = [d for d in blob.get("decks", []) if d["id"] != deck_id]
+        _write_file(blob)
+    try:
+        os.remove(os.path.join(DECK_DIR, "%d.pptx" % deck_id))
+    except OSError:
+        pass
+
+
+# ----------------------------------------------------------------------- AI log
+
+AI_COLS = ("id", "created_at", "job_id", "group_id", "months", "model", "est_usd",
+           "cost_usd", "input_tokens", "output_tokens", "ok", "detail")
+
+
+def add_ai_log(**row):
+    """One AI summary run: what it was estimated at and what it cost."""
+    row = {k: row.get(k) for k in AI_COLS if k not in ("id", "created_at")}
+    row["months"] = row.get("months") or []
+    row["detail"] = (row.get("detail") or "")[:500]
+    if available():
+        try:
+            cols = list(row)
+            with _connect() as con:
+                con.execute("INSERT INTO ccr_ai_log (%s) VALUES (%s)" % (
+                    ", ".join(cols),
+                    ", ".join("%s::jsonb" if c == "months" else "%s" for c in cols)),
+                    [json.dumps(row[c]) if c == "months" else row[c] for c in cols])
+            return
+        except Exception as exc:
+            _degrade(exc)
+    with _LOCK:
+        blob = _file()
+        blob["ai_seq"] = blob.get("ai_seq", 0) + 1
+        blob.setdefault("ai_log", []).append(dict(row, id=blob["ai_seq"], created_at=_now()))
+        _write_file(blob)
+
+
+def ai_log(limit=200):
+    """Newest first."""
+    if available():
+        try:
+            with _connect() as con:
+                rows = con.execute("SELECT %s FROM ccr_ai_log ORDER BY id DESC LIMIT %%s"
+                                   % ", ".join(AI_COLS), (limit,)).fetchall()
+            out = []
+            for r in rows:
+                d = dict(zip(AI_COLS, r))
+                d["created_at"] = d["created_at"].isoformat(timespec="seconds")
+                out.append(d)
+            return out
+        except Exception as exc:
+            _degrade(exc)
+    return list(reversed(_file().get("ai_log", [])))[:limit]
