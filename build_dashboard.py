@@ -262,6 +262,12 @@ HTML = r'''<!DOCTYPE html>
   .gp-item .n{flex:1;overflow:hidden;text-overflow:ellipsis}
   .gp-item .c{font-size:11px;font-weight:600;opacity:.75}
   .gp-empty{padding:12px;font-family:var(--head);font-size:11.5px;color:#7A8694;line-height:1.5}
+  .gp-search{position:sticky;top:-7px;z-index:1;background:var(--panel);margin:-7px -7px 6px;
+    padding:7px 7px 6px;border-bottom:1px solid var(--line)}
+  .gp-search input{width:100%;box-sizing:border-box;font-family:var(--head);font-size:13px;
+    color:#1B2430;border:1px solid var(--line);border-radius:9px;padding:8px 11px;outline:none;background:#fff}
+  .gp-search input:focus{border-color:#1877F2;box-shadow:0 0 0 3px rgba(24,119,242,.15)}
+  .gp-item.hi:not(.sel){background:#E7F0FE;color:#1877F2}
 
   /* ---- Brand confirm dialog ---- */
   .bd-back{position:fixed;inset:0;background:rgba(11,20,34,.5);z-index:200;display:none;
@@ -840,23 +846,60 @@ window.FBDASH = {group:'', months:{}, brands:[], ready:false};
   window.FBDASH.goTo=goTo;
 
   /* ---------- the dropdown ---------- */
+  /* The list grows with every group switched on in Agency Intelligence, so
+     the popover carries a search box: type to narrow, ↑/↓ to move, Enter to pick. */
+  var search=null, items=null, hi=0;
   function paint(){
     if(!groups.length){
       pop.innerHTML='<div class="gp-empty">ยังไม่มี Product Group ที่ใช้ได้ '
         +'— เปิดใช้กลุ่มในหน้า Setting ของ Agency Intelligence ก่อน</div>';
       return;
     }
-    pop.innerHTML=groups.map(function(g){
+    pop.innerHTML='<div class="gp-search"><input type="search" id="gpSearch" autocomplete="off"'
+      +' placeholder="ค้นหากลุ่ม…" aria-label="ค้นหา Product Group"></div><div id="gpItems"></div>';
+    search=document.getElementById('gpSearch'); items=document.getElementById('gpItems');
+    search.addEventListener('input',function(){hi=0; filter();});
+    search.addEventListener('keydown',function(e){
+      var shown=items.querySelectorAll('.gp-item');
+      if(e.key==='ArrowDown'||e.key==='ArrowUp'){
+        e.preventDefault();
+        if(!shown.length) return;
+        hi=(hi+(e.key==='ArrowDown'?1:-1)+shown.length)%shown.length; mark();
+      }else if(e.key==='Enter'){
+        e.preventDefault();
+        if(shown[hi]){open(false); askBrands(shown[hi].getAttribute('data-id'));}
+      }else if(e.key==='Escape'){
+        e.stopPropagation(); open(false); btn.focus();
+      }
+    });
+    filter();
+  }
+  function filter(){
+    var q=search.value.trim().toLowerCase();
+    var hits=groups.filter(function(g){return !q || String(g.name).toLowerCase().indexOf(q)>-1;});
+    if(!hits.length){
+      items.innerHTML='<div class="gp-empty">ไม่พบกลุ่มที่ชื่อมี “'+search.value.trim()
+        .replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];})+'”</div>';
+      return;
+    }
+    items.innerHTML=hits.map(function(g){
       return '<button class="gp-item'+(g.id===current?' sel':'')+'" type="button" role="option"'
         +' data-id="'+g.id+'" aria-selected="'+(g.id===current)+'">'
         +'<span class="gp-dot" style="background:'+(g.color||'#C6CED8')+'"></span>'
         +'<span class="n">'+g.name+'</span>'
         +'<span class="c">'+g.facebookBrands+' แบรนด์</span></button>';
     }).join('');
+    if(q) mark();
+  }
+  function mark(){
+    var shown=items.querySelectorAll('.gp-item');
+    shown.forEach(function(b,i){b.classList.toggle('hi',i===hi);});
+    if(shown[hi]) shown[hi].scrollIntoView({block:'nearest'});
   }
   function open(on){
     pop.classList.toggle('open',on);
     btn.setAttribute('aria-expanded',on?'true':'false');
+    if(on && search){search.value=''; hi=0; filter(); search.focus();}
   }
   btn.addEventListener('click',function(e){e.stopPropagation();open(!pop.classList.contains('open'));});
   document.addEventListener('click',function(e){
