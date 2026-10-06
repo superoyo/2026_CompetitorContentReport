@@ -165,6 +165,13 @@
     border-radius:10px;padding:4px;outline:none}
   .ai-box select:focus{border-color:var(--blue)}
   .ai-warn{color:var(--red);font-size:12.5px;margin-top:6px}
+  .rk{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:2px 0 12px}
+  .rk label{display:block;border:1px solid var(--line);border-radius:10px;padding:9px 11px;cursor:pointer;
+    font-family:var(--head);font-size:13px;font-weight:700}
+  .rk label small{display:block;font-family:var(--body);font-weight:400;font-size:11.5px;color:var(--muted);margin:3px 0 0}
+  .rk input{margin:0 6px 0 0;width:auto;vertical-align:-1px}
+  .rk label:has(input:checked){border-color:var(--blue);background:var(--blue-soft)}
+  .dk-bar .ak{background:#0B2545;color:#fff;border-radius:999px;padding:0 6px;font-size:10px;line-height:16px}
   /* AI cost log */
   .log{margin-top:22px}
   .log summary{font-family:var(--head);font-size:15px;font-weight:800;cursor:pointer;padding:14px 18px;list-style:none;
@@ -302,6 +309,13 @@
       <p id="askSub">—</p>
       <ul id="askList"></ul>
       <div class="ai-box" id="aiBox" hidden>
+        <label>รูปแบบรายงาน</label>
+        <div class="rk">
+          <label><input type="radio" name="rk" value="standard" checked>Standard Report
+            <small>สรุปข้อมูลทั้งช่วง Top 5 แนวโน้มรายเดือน และบทวิเคราะห์รายเพจ</small></label>
+          <label><input type="radio" name="rk" value="analysis">Analysis Report
+            <small>วิเคราะห์เชิงลึก 4 ด้าน: เนื้อหา เวลา/ความถี่ คุณภาพผู้ชม ความสัมพันธ์/แนวโน้ม (ใช้ AI 2 รอบ)</small></label>
+        </div>
         <label for="aiFind">AI ที่ใช้สรุปรายงานและข้อเสนอแนะ</label>
         <small id="aiHint">ผ่าน OpenRouter — ราคาต่อ 1 ล้าน token (เข้า / ออก)</small>
         <input id="aiFind" type="search" placeholder="ค้นหาโมเดล เช่น claude, gpt, gemini…" autocomplete="off">
@@ -516,7 +530,8 @@
         if(it.job.model) label += ' · '+esc(shortModel(it.job.model));
       }else{
         var ai = it.deck.model ? shortModel(it.deck.model) : '';
-        label = 'PPT' + (n > 1 ? ' <span class="n">สรุป '+n+' เดือน</span> '+esc(spanLabel(it.months)) : '')
+        label = 'PPT' + (it.deck.report === 'analysis' ? ' <span class="ak">Analysis</span>' : '')
+          + (n > 1 ? ' <span class="n">สรุป '+n+' เดือน</span> '+esc(spanLabel(it.months)) : '')
           + (ai ? ' <span class="m">· '+esc(ai)+'</span>' : '');
         tip = it.deck.filename+' · '+(it.deck.size/1048576).toFixed(1)+' MB · '
           + (n > 1 ? 'สรุปจาก '+n+' เดือน: '+spanLabel(it.months) : 'เดือน '+mLabel(it.months[0]))
@@ -650,11 +665,15 @@
 
   /* ---- choosing the AI that summarises, with a price shown before running ---- */
   var models = null, aiModel = '', fetchCost = '', singleOnly = false, askGroups = [], estSeq = 0;
+  var reportKind = 'standard';
+  function kindNow(){ var r = document.querySelector('input[name=rk]:checked'); return r ? r.value : 'standard'; }
   var LAST_MODEL = 'ccrAiModel';
   function perM(v){ var n = v * 1e6; return '$' + (n < 1 ? n.toFixed(2) : n < 10 ? n.toFixed(1) : Math.round(n)); }
   function openPicker(groups){
     askGroups = groups;
-    aiModel = singleOnly ? '' : (load(LAST_MODEL) || '');
+    reportKind = kindNow();
+    var keepOld = singleOnly && reportKind !== 'analysis';
+    aiModel = keepOld ? '' : (load(LAST_MODEL) || '');
     $('aiFind').value = '';
     $('aiWarn').textContent = data.openrouter ? '' :
       'ยังไม่ได้ตั้ง OPENROUTER_API (หรือ OPENROUTER_API_KEY) บนเซิร์ฟเวอร์ — สรุปด้วย AI ไม่ได้'
@@ -662,7 +681,7 @@
     var ready = models ? Promise.resolve() : api('GET', 'models').then(function(j){ models = j.models || []; });
     $('aiSel').innerHTML = '<option>กำลังโหลดรายชื่อโมเดล…</option>';
     ready.then(function(){
-      if(!singleOnly && !aiModel){
+      if(!keepOld && !aiModel){
         var rec = models.filter(function(m){ return m.recommended; })[0] || models[0];
         aiModel = rec ? rec.id : '';
       }
@@ -681,7 +700,7 @@
     var rec = hit.filter(function(m){ return m.recommended; });
     var rest = hit.filter(function(m){ return !m.recommended; });
     var h = '';
-    if(singleOnly) h += '<option value=""'+(aiModel === '' ? ' selected' : '')
+    if(singleOnly && reportKind !== 'analysis') h += '<option value=""'+(aiModel === '' ? ' selected' : '')
       + '>ใช้บทวิเคราะห์เดิมของเดือนนั้น (ไม่มีค่าใช้จ่าย AI)</option>';
     if(rec.length) h += '<optgroup label="แนะนำ">'+rec.map(opt).join('')+'</optgroup>';
     if(rest.length) h += '<optgroup label="ทั้งหมด ('+rest.length+')">'+rest.map(opt).join('')+'</optgroup>';
@@ -690,21 +709,23 @@
   function priceIt(){
     var bits = [];
     if(!aiModel){
-      $('askEst').textContent = (fetchCost ? fetchCost+' · ' : '')+'ไม่ใช้ AI สรุปใหม่ — ไม่มีค่าใช้จ่าย AI';
-      $('askYes').disabled = !singleOnly;
+      $('askEst').textContent = reportKind === 'analysis' ? 'Analysis Report ต้องเลือกโมเดล AI'
+        : (fetchCost ? fetchCost+' · ' : '')+'ไม่ใช้ AI สรุปใหม่ — ไม่มีค่าใช้จ่าย AI';
+      $('askYes').disabled = !singleOnly || reportKind === 'analysis';
       return;
     }
     if(!data.openrouter){ $('askYes').disabled = true; }
     $('askEst').textContent = (fetchCost ? fetchCost+' · ' : '')+'กำลังประเมินค่า AI…';
     var mine = ++estSeq;
-    api('POST', 'estimate', {model: aiModel, items: askGroups.map(function(g){
+    api('POST', 'estimate', {model: aiModel, report: reportKind, items: askGroups.map(function(g){
       return {group: g.group, months: g.items.map(function(i){ return i.month; })};
     })}).then(function(j){
       if(mine !== estSeq) return;
       var r = j.rows || [], tin = 0, tout = 0;
       r.forEach(function(x){ tin += x.input_tokens; tout += x.output_tokens; });
       $('askEst').textContent = (fetchCost ? fetchCost+' · ' : '')
-        + 'ค่า AI สรุป ('+shortModel(aiModel)+') ประมาณ '+(j.usd == null ? '—' : usd(j.usd))
+        + (reportKind === 'analysis' ? 'ค่า AI วิเคราะห์ (' : 'ค่า AI สรุป (')
+        + shortModel(aiModel)+') ประมาณ '+(j.usd == null ? '—' : usd(j.usd))
         + ' (เข้า ~'+Math.round(tin/1000)+'k · ออก ~'+Math.round(tout/1000)+'k token) — ค่าจริงจะบันทึกใน log';
       $('askYes').disabled = !data.openrouter;
     })['catch'](function(err){
@@ -712,6 +733,16 @@
     });
   }
   $('aiFind').addEventListener('input', fillModels);
+  document.querySelectorAll('input[name=rk]').forEach(function(r){
+    r.addEventListener('change', function(){
+      reportKind = kindNow();
+      if(reportKind === 'analysis' && !aiModel){
+        var rec = (models || []).filter(function(m){ return m.recommended; })[0];
+        aiModel = load(LAST_MODEL) || (rec ? rec.id : '');
+      }
+      fillModels(); priceIt();
+    });
+  });
   $('aiSel').addEventListener('change', function(){
     aiModel = $('aiSel').value;
     if(aiModel) store(LAST_MODEL, aiModel);
@@ -731,11 +762,11 @@
     }else{
       // Missing months first, then the deck: the queue runs in order.
       body = items.filter(function(i){ return !i.has; }).concat(byGroup(items).map(function(g){
-        return {group: g.group, name: g.name, kind: 'ppt', model: aiModel,
+        return {group: g.group, name: g.name, kind: 'ppt', model: aiModel, report: reportKind,
                 months: g.items.map(function(i){ return i.month; })};
       }));
     }
-    if(mode === 'ppt' && !singleOnly && !aiModel){
+    if(mode === 'ppt' && (!singleOnly || reportKind === 'analysis') && !aiModel){
       $('askYes').disabled = false; $('askMsg').textContent = 'เลือกโมเดล AI ก่อน'; return;
     }
     api('POST', 'jobs', {items: body}).then(function(j){
@@ -764,7 +795,8 @@
       return (order[a.status]-order[b.status]) || (a.status==='done'||a.status==='failed' ? b.id-a.id : a.id-b.id);
     });
     $('trayB').innerHTML = list.map(function(j){
-      var title = (j.kind === 'analyse' ? 'บทวิเคราะห์ · ' : j.kind === 'ppt' ? 'PPT · ' : '')
+      var title = (j.kind === 'analyse' ? 'บทวิเคราะห์ · ' : j.kind === 'ppt'
+          ? (j.report === 'analysis' ? 'Analysis PPT · ' : 'PPT · ') : '')
         + esc(j.group_name || j.group_id)+' · '
         + (j.kind === 'ppt' ? esc(spanLabel(j.months && j.months.length ? j.months : [j.month])) : mLabel(j.month)),
         chip, det = '', row = '', x = '';
@@ -773,9 +805,9 @@
         det = '<div class="det">รอให้งานก่อนหน้าเสร็จ</div>';
         row = '<div class="row"><button class="mini" data-act="cancel" data-id="'+j.id+'">ยกเลิก</button></div>';
       }else if(j.status === 'running' && j.kind === 'ppt'){
-        var aiStep = j.step === 'สรุปด้วย AI';
+        var aiStep = j.step === 'สรุปด้วย AI' || j.step === 'วิเคราะห์ด้วย AI';
         chip = '<span class="chip running '+(aiStep ? 'ph-analyse' : 'ph-ppt')+'">'
-          + (aiStep ? 'กำลังสรุปด้วย AI' : 'กำลังสร้าง PPT')+'</span>';
+          + (aiStep ? (j.report === 'analysis' ? 'กำลังวิเคราะห์ด้วย AI' : 'กำลังสรุปด้วย AI') : 'กำลังสร้าง PPT')+'</span>';
         det = '<div class="det">'+esc(j.step||'กำลังเริ่ม')+(aiStep ? ' · '+esc(shortModel(j.model)) : '')
           + ' · '+(j.months||[]).length+' เดือน · ขั้นนี้ '+ago(j.step_at)+'</div>'
           + (j.model ? '<div class="det">ค่า AI ประมาณ '+usd(j.est_usd)+'</div>' : '');
@@ -783,6 +815,7 @@
       }else if(j.status === 'done' && j.kind === 'ppt'){
         var dk = decks.filter(function(d){
           return d.group_id === j.group_id && (d.model || '') === (j.model || '')
+            && (d.report || 'standard') === (j.report || 'standard')
             && JSON.stringify(d.months) === JSON.stringify((j.months||[]).slice().sort());
         })[0];
         chip = '<span class="chip done">Complete</span>';
@@ -872,13 +905,14 @@
       $('logSum').textContent = rows.length ? rows.length+' ครั้ง · รวม '+usd(total) : 'ยังไม่มี';
       if(!rows.length){ $('logBody').innerHTML = '<div class="empty">ยังไม่มีการสรุปด้วย AI</div>'; return; }
       var names = {}; (data.groups || []).forEach(function(g){ names[g.id] = g.name; });
-      $('logBody').innerHTML = '<table><thead><tr><th>เวลา</th><th>กลุ่ม</th><th>ช่วง</th><th>โมเดล</th>'
+      $('logBody').innerHTML = '<table><thead><tr><th>เวลา</th><th>กลุ่ม</th><th>ช่วง</th><th>โมเดล</th><th>รายงาน</th>'
         + '<th class="n">ประมาณ</th><th class="n">จริง</th><th class="n">token เข้า / ออก</th><th>ผล</th></tr></thead><tbody>'
         + rows.map(function(r){
           var t = new Date(r.created_at);
           return '<tr><td>'+esc(t.toLocaleString('th-TH', {dateStyle:'short', timeStyle:'short'}))+'</td>'
             + '<td>'+esc(names[r.group_id] || r.group_id)+'</td><td>'+esc(spanLabel(r.months || []))+'</td>'
-            + '<td>'+esc(r.model)+'</td><td class="n">'+usd(r.est_usd)+'</td><td class="n"><b>'+usd(r.cost_usd)+'</b></td>'
+            + '<td>'+esc(r.model)+'</td><td>'+(r.report === 'analysis' ? 'Analysis' : 'Standard')+'</td>'
+            + '<td class="n">'+usd(r.est_usd)+'</td><td class="n"><b>'+usd(r.cost_usd)+'</b></td>'
             + '<td class="n">'+(r.input_tokens == null ? '—' : r.input_tokens.toLocaleString()+' / '+r.output_tokens.toLocaleString())+'</td>'
             + '<td'+(r.ok ? '' : ' class="bad"')+'>'+(r.ok ? '✓ สำเร็จ' : '✕ '+esc(r.detail))+'</td></tr>';
         }).join('')+'</tbody></table>';

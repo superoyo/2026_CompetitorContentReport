@@ -463,7 +463,7 @@ def run_pipeline(group, month, brands, job_id=None):
 
 # ---------------------------------------------------------------- admin queue
 
-def deck_filename(name, months, model_label):
+def deck_filename(name, months, model_label, report="standard"):
     """e.g. Systema_Jul-Sep_2026_claude-sonnet-5.5.pptx — says what it covers
     and which AI wrote it, once it is sitting in someone's Downloads."""
     safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in (name or "group")).strip("_")
@@ -474,7 +474,8 @@ def deck_filename(name, months, model_label):
         span = "%s-%s_%d" % (a["en_full"][:3], b["en_full"][:3], a["year"])
     else:
         span = "%s_%d-%s_%d" % (a["en_full"][:3], a["year"], b["en_full"][:3], b["year"])
-    return "%s_%s_%s.pptx" % (safe or "group", span, model_label or "no-ai")
+    kind = "_Analysis" if report == "analysis" else ""
+    return "%s_%s%s_%s.pptx" % (safe or "group", span, kind, model_label or "no-ai")
 
 
 def _owned(group):
@@ -484,7 +485,7 @@ def _owned(group):
         return set()
 
 
-def estimate_summary(group, months, model):
+def estimate_summary(group, months, model, report="standard"):
     """What summarising these months with `model` should cost, before running it.
 
     Measured on the prompt the run would actually send. Months not fetched yet
@@ -499,13 +500,19 @@ def estimate_summary(group, months, model):
     if payloads:
         P = period.combine(group, payloads, ())
         P["period"] = period.labels(months)
-        system, user = analyse_period.prompt(P)
-        chars, n = len(system) + len(user), len(P["brands"])
+        calls = analyse_period.estimate_calls(P, report)
+        # Months not fetched yet still add posts to classify: scale that call.
+        if report == "analysis" and len(payloads) < len(months):
+            c, o = calls[0]
+            calls[0] = (c * len(months) / len(payloads), o * len(months) / len(payloads))
     else:
         n = 6
-        chars = len(analyse_period.analyse.SYSTEM) + 2500 * n
-    est = openrouter.estimate(chars, n, model)
-    est.update(group=group, months=months, model=model, have=len(payloads))
+        calls = [(len(analyse_period.analyse.SYSTEM) + 2500 * n,
+                  openrouter.OUT_PER_BRAND * n + openrouter.OUT_FIXED)]
+        if report == "analysis":
+            calls = [(70000 * len(months) / 3, 5000 * len(months) / 3), (40000, 15000)]
+    est = openrouter.estimate_calls(calls, model)
+    est.update(group=group, months=months, model=model, report=report, have=len(payloads))
     return est
 
 
@@ -519,6 +526,7 @@ def run_deck(job):
     job_id, group = job["id"], job["group_id"]
     months = sorted(job.get("months") or [job["month"]])
     model = (job.get("model") or "").strip()
+    report = "analysis" if job.get("report") == "analysis" else "standard"
     out = "/tmp/ccr_deck_out_%d.pptx" % job_id
     work = "/tmp/ccr_deck_src_%d.json" % job_id
     img_dir = os.path.join(DECK_IMAGES, "job_%d" % job_id)
@@ -536,8 +544,8 @@ def run_deck(job):
         if missing:
             raise RuntimeError("ยังไม่มีข้อมูลเดือน %s — ดึงข้อมูลก่อนแล้วกด Retry"
                                % ", ".join(missing))
-        if len(months) > 1 and not model:
-            raise RuntimeError("PPT หลายเดือนต้องเลือกโมเดล AI สำหรับสรุป")
+        if (len(months) > 1 or report == "analysis") and not model:
+            raise RuntimeError("PPT หลายเดือนและ Analysis Report ต้องเลือกโมเดล AI")
 
         if not model:
             source = deck_shim(group, months[0])
@@ -550,13 +558,14 @@ def run_deck(job):
             with open(work, "w", encoding="utf-8") as f:
                 json.dump(P, f, ensure_ascii=False)
 
-            store.update_job(job_id, step="สรุปด้วย AI", step_at=True)
+            store.update_job(job_id, step="วิเคราะห์ด้วย AI" if report == "analysis" else "สรุปด้วย AI",
+                             step_at=True)
             _log("=== สรุป %s · %s ด้วย %s (ประมาณ $%s) ===" % (
                 group, ", ".join(months), model, job.get("est_usd")))
             code, text, err = _run_step(
                 "analyse_period.py",
                 dict(os.environ, PROCESSED_JSON=work, OPENROUTER_MODEL=model,
-                     PYTHONUNBUFFERED="1"), timeout=1200)
+                     REPORT_KIND=report, PYTHONUNBUFFERED="1"), timeout=1800)
             for line in text.splitlines()[-15:]:
                 _log(line)
             costs, tokens, used = {}, (None, None), model
@@ -572,7 +581,7 @@ def run_deck(job):
             store.add_ai_log(job_id=job_id, group_id=group, months=months, model=used,
                              est_usd=job.get("est_usd"), cost_usd=cost,
                              input_tokens=tokens[0], output_tokens=tokens[1],
-                             ok=why is None, detail=why or "")
+                             ok=why is None, detail=why or "", report=report)
             logged = True
             if job_id in RESTART:
                 raise RuntimeError("ยกเลิกเพื่อเริ่มใหม่")
@@ -596,8 +605,8 @@ def run_deck(job):
         store.update_job(job_id, step="บันทึกไฟล์", step_at=True)
         with open(out, "rb") as f:
             data = f.read()
-        name = deck_filename(job.get("group_name") or group, months, label)
-        store.save_deck(group, months, name, data, model=model)
+        name = deck_filename(job.get("group_name") or group, months, label, report)
+        store.save_deck(group, months, name, data, model=model, report=report)
         store.update_job(job_id, status="done", step="เสร็จสมบูรณ์", error="",
                          note="%s · %.1f MB" % (name, len(data) / 1048576.0),
                          cost_usd=round(cost, 4) if cost is not None else (None if model else 0),
@@ -615,7 +624,7 @@ def run_deck(job):
                              cost_detail={"openrouter": cost} if cost is not None else {})
         if model and not logged:
             store.add_ai_log(job_id=job_id, group_id=group, months=months, model=model,
-                             est_usd=job.get("est_usd"), ok=False, detail=str(exc))
+                             est_usd=job.get("est_usd"), ok=False, detail=str(exc), report=report)
     finally:
         for path in (out, work):
             try:
@@ -1162,7 +1171,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     if kind == "fetch" and not APIFY_TOKEN:
                         raise ValueError("ยังไม่ได้ตั้งค่า APIFY_TOKEN บนเซิร์ฟเวอร์")
                     months = []
-                    model, est = "", None
+                    model, est, report = "", None, "standard"
                     if kind == "ppt":
                         months = sorted({str(m).strip() for m in it.get("months") or []})
                         if not months:
@@ -1170,14 +1179,16 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                         for m in months:
                             month_util.parse(m)
                         model = str(it.get("model") or "").strip()
-                        if len(months) > 1 and not model:
-                            raise ValueError("PPT หลายเดือนต้องเลือกโมเดล AI สำหรับสรุป")
+                        report = "analysis" if it.get("report") == "analysis" else "standard"
+                        if (len(months) > 1 or report == "analysis") and not model:
+                            raise ValueError("PPT หลายเดือนและ Analysis Report ต้องเลือกโมเดล AI")
                         if model:
                             if not openrouter.configured():
                                 raise ValueError("ยังไม่ได้ตั้ง OPENROUTER_API (หรือ OPENROUTER_API_KEY) บนเซิร์ฟเวอร์")
                             if not openrouter.find(model):
                                 raise ValueError("ไม่พบโมเดล %s ใน OpenRouter" % model)
-                            est = estimate_summary(str(it.get("group") or ""), months, model)["usd"]
+                            est = estimate_summary(str(it.get("group") or ""), months, model,
+                                                   report)["usd"]
                         it = dict(it, month=months[0])
                     month = str(it.get("month") or "").strip()
                     month_util.parse(month)
@@ -1189,6 +1200,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     if group:
                         items.append({"group_id": group, "month": month, "kind": kind,
                                       "months": months, "model": model, "est_usd": est,
+                                      "report": report,
                                       "group_name": str(it.get("name") or "")[:200]})
             except ValueError as exc:
                 self._json(400, {"error": str(exc)}); return
@@ -1206,8 +1218,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             try:
                 body = self._body()
                 model = str(body.get("model") or "").strip()
+                report = "analysis" if body.get("report") == "analysis" else "standard"
                 rows = [estimate_summary(str(it.get("group") or ""),
-                                         sorted(it.get("months") or []), model)
+                                         sorted(it.get("months") or []), model, report)
                         for it in body.get("items") or []]
             except Exception as exc:
                 self._json(400, {"error": "ประเมินราคาไม่ได้ — %s" % exc}); return

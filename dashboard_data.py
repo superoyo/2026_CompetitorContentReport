@@ -241,6 +241,9 @@ def build():
             'url': p.get('url') or URL.get(key, ''),
             'thumb': img_b64(p.get('thumb')),
             'w': p.get('thumb_w'), 'h': p.get('thumb_h'),
+            # For the Analysis Report: hour, album size, link, reaction mix.
+            **{f: p[f] for f in ('ts', 'media_count', 'link', 'reactions', 'views', 'paid')
+               if p.get(f) is not None},
         } for p in lst]
 
     AVATARS = P.get('avatars') or {}

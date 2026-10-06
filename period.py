@@ -63,6 +63,13 @@ def combine(group, payloads, owned=()):
         b["owned"] = b["key"] in owned or bool(b.get("owned"))
 
     agg, metrics, top5, monthly = {}, {}, {}, {}
+    # Every post of the span (for the Analysis Report), and each page's
+    # follower count as recorded with each month.
+    allposts, followers, seq = {}, {}, 0
+    for m in months:
+        for row in payloads[m].get("mo") or []:
+            if row.get("fans"):
+                followers.setdefault(row["key"], {})[m] = _num(row["fans"])
     for b in brands:
         k = b["key"]
         tot = dict(posts=0, likes=0, comments=0, shares=0, total=0)
@@ -86,6 +93,13 @@ def combine(group, payloads, owned=()):
                     post[f] = _num(post.get(f))
                 posts.append(post)
             trend.append({"month": m, "posts": _num(a.get("posts")), "total": _num(a.get("total"))})
+            for post in (p.get("all") or {}).get(k) or []:
+                seq += 1
+                q = {f: v for f, v in post.items() if f not in ("thumb", "w", "h")}
+                for f in ("likes", "comments", "shares", "total"):
+                    q[f] = _num(q.get(f))
+                q.update(id="p%d" % seq, month=m, brand=k)
+                allposts.setdefault(k, []).append(q)
         tot["avg"] = round(tot["total"] / tot["posts"], 1) if tot["posts"] else 0
         agg[k] = tot
 
@@ -114,6 +128,8 @@ def combine(group, payloads, owned=()):
         "metrics": metrics,
         "top5": top5,
         "monthly": monthly,
+        "posts": allposts,
+        "followers": followers,
         "period": labels(months),
     }
 

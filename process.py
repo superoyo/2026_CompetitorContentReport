@@ -92,6 +92,39 @@ def media_type(item):
         return 'text'
     return 'other'
 
+REACTIONS = ("Like", "Love", "Care", "Haha", "Wow", "Sad", "Angry")
+
+
+def detail(item):
+    """What the Analysis Report needs beyond the totals, from the raw post.
+
+    Every field is optional in the scraper's output, so each is kept only when
+    present: an absent count must read as "unknown", not as zero.
+    """
+    out = {}
+    ts = item.get('timestamp')
+    if isinstance(ts, (int, float)) and ts > 0:
+        import datetime
+        out['ts'] = datetime.datetime.fromtimestamp(
+            ts, datetime.timezone(datetime.timedelta(hours=7))).isoformat(timespec='minutes')
+    media = item.get('media')
+    if isinstance(media, list):
+        out['media_count'] = len(media)
+    link = item.get('link') or ((item.get('previewTarget') or {}).get('external_url'))
+    if link and 'facebook.com' not in str(link):
+        out['link'] = str(link)[:300]
+    r = {n.lower(): item.get('reaction%sCount' % n) for n in REACTIONS}
+    r = {k: v for k, v in r.items() if isinstance(v, (int, float))}
+    if r:
+        out['reactions'] = r
+    views = item.get('viewsCount') or item.get('videoPostViewCount')
+    if isinstance(views, (int, float)):
+        out['views'] = int(views)
+    if item.get('paidPartnership') is not None:
+        out['paid'] = bool(item.get('paidPartnership'))
+    return out
+
+
 def best_image_url(item):
     m = item.get('media') or []
     for x in m:
@@ -166,6 +199,7 @@ for k in PAGES:
             'likes': likes, 'comments': comments, 'shares': shares, 'total': tot,
             'url': p.get('topLevelUrl') or p.get('url') or '',
             'media_type': mt, 'image_url': best_image_url(p),
+            **detail(p),
         })
     n = len(posts)
     total = tl + cm + sh

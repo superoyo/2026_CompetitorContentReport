@@ -185,7 +185,8 @@ s = add_slide(); set_bg(s, DARK)
 add_ring(s, 13.7, -0.3, 2.6, RING, 1.6); add_ring(s, 13.0, 0.7, 1.1, RING, 1.6); add_ring(s, -0.3, 8.0, 1.8, RING, 1.6)
 add_rect(s, 1.0, 2.05, 0.9, 0.09, fill=ACCENT)
 add_text(s, 1.0, 2.25, 11.3, 0.5, "รายงานสรุป Engagement บน Facebook", size=19, color=hx('#9FC9DE'), bold=True, font=HEAD_FONT)
-add_text(s, 1.0, 2.72, 11.5, 1.3, "Top 5 คอนเทนต์ยอด Engagement สูงสุด", size=42, color=WHITE, bold=True, font=HEAD_FONT)
+add_text(s, 1.0, 2.72, 11.5, 1.3, "Analysis Report" if P.get('report') else "Top 5 คอนเทนต์ยอด Engagement สูงสุด",
+         size=42, color=WHITE, bold=True, font=HEAD_FONT)
 add_text(s, 1.0, 3.7, 11.3, 0.6, "ประจำ%s  (%s)  ·  %d เพจ" % (IN_SPAN, EN_SPAN, len(BRANDS)), size=19, color=hx('#CFE7F0'), font=HEAD_FONT)
 
 bx, by = 1.0, 4.75
@@ -262,6 +263,11 @@ if PERIOD and P.get('monthly'):
     va = ch.value_axis; va.tick_labels.font.size = Pt(10); va.tick_labels.number_format = '#,##0'
     va.tick_labels.number_format_is_linked = False
     va.major_gridlines.format.line.color.rgb = hx('#E5EAF0')
+
+# ============ Analysis Report (analyse_period.py, REPORT_KIND=analysis) ============
+if P.get('report'):
+    import analysis_slides
+    analysis_slides.render(globals())
 
 # ============ per-brand Top5 + Analysis ============
 CARD_W, CARD_GAP, IMG_H, X0, CARD_TOP = 2.15, 0.35, 2.62, 0.6, 1.62

@@ -106,6 +106,16 @@ def estimate(prompt_chars, n_brands, model_id):
             "usd": round(usd, 4) if usd is not None else None}
 
 
+def estimate_calls(calls, model_id):
+    """Several requests: calls = [(prompt characters, expected output tokens)]."""
+    m = find(model_id)
+    tin = sum(int(c / CHARS_PER_TOKEN) for c, _ in calls)
+    tout = sum(o for _, o in calls)
+    usd = (tin * m["prompt"] + tout * m["completion"]) if m else None
+    return {"input_tokens": tin, "output_tokens": tout, "calls": len(calls),
+            "usd": round(usd, 4) if usd is not None else None}
+
+
 def chat(model_id, system, user, schema=None, max_tokens=32000, timeout=900):
     """One completion. Returns (text, usage dict, model actually used,
     finish_reason).
