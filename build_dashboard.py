@@ -73,7 +73,16 @@ HTML = r'''<!DOCTYPE html>
   body{font-family:var(--body);background:var(--bg);color:var(--txt);
     padding:34px 40px 72px;max-width:1360px;margin:0 auto;-webkit-font-smoothing:antialiased}
   h1,h2,h3,h4,.val,.big,.dot,.tab,.n{font-family:var(--head)}
-  .head{display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:16px;margin-bottom:28px}
+  .head{display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:16px;margin-bottom:28px;position:relative}
+  .ad-btn{position:absolute;top:0;right:0;font-family:var(--head);font-size:12.5px;font-weight:700;color:#5A6675;
+    background:var(--panel);border:1px solid var(--line);padding:7px 14px;border-radius:999px;cursor:pointer;
+    box-shadow:var(--shadow);display:flex;align-items:center;gap:6px;transition:.15s}
+  .ad-btn:hover{border-color:#1877F2;color:#1877F2}
+  .ad-card{max-width:380px}
+  .ad-card input{width:100%;margin-top:14px;font-size:15px;border:1px solid var(--line);border-radius:10px;
+    padding:11px 13px;outline:none;font-family:var(--body)}
+  .ad-card input:focus{border-color:#1877F2;box-shadow:0 0 0 3px rgba(24,119,242,.15)}
+  .ad-msg{color:#C62828;font-size:12.5px;min-height:18px;margin-top:6px}
   .head h1{font-size:30px;font-weight:800;letter-spacing:-.5px;font-family:var(--head)}
   .head .sub{color:var(--muted);font-size:14px;margin-top:8px}
   .badge{background:#FFF3DF;color:#9A5B00;font-weight:700;padding:8px 16px;border-radius:999px;font-size:13px;font-family:var(--head);border:1px solid #F6E2BE}
@@ -372,6 +381,7 @@ HTML = r'''<!DOCTYPE html>
 </head>
 <body>
   <div class="head">
+    <button id="adBtn" class="ad-btn" type="button"><span>⚙</span>Admin</button>
     <div>
       <div class="gp-wrap">
         <button id="gpBtn" class="gp-btn" type="button" data-group="__GROUP_ID__"
@@ -449,6 +459,24 @@ HTML = r'''<!DOCTYPE html>
         </div>
       </div>
     </div>
+  </div>
+
+  <div class="bd-back" id="adBack" role="dialog" aria-modal="true" aria-labelledby="adTitle">
+    <form class="bd-card ad-card" id="adForm">
+      <div class="bd-head">
+        <h3 id="adTitle">เข้าเมนู Admin</h3>
+        <p>พิมพ์รหัสผ่านเพื่อเข้าใช้งาน</p>
+        <input id="adPw" type="password" autocomplete="current-password" placeholder="รหัสผ่าน">
+        <div class="ad-msg" id="adMsg"></div>
+      </div>
+      <div class="bd-foot">
+        <span></span>
+        <div class="bd-acts">
+          <button class="bd-cancel" id="adCancel" type="button">ยกเลิก</button>
+          <button class="bd-go" type="submit">เข้าสู่ระบบ</button>
+        </div>
+      </div>
+    </form>
   </div>
 
   <div class="mo-card" id="moCard"></div>
@@ -1021,6 +1049,31 @@ window.FBDASH = {group:'', months:{}, brands:[], ready:false};
       lbl.textContent=current||'เลือก Product Group';
       pop.innerHTML='<div class="gp-empty">ดึงรายชื่อกลุ่มไม่ได้ — '+err.message+'</div>';
     });
+})();
+</script>
+<script>
+/* Admin menu: the password is checked by the server, then remembered so the
+   admin page (and the next visit) does not ask again. */
+(function(){
+  var back=document.getElementById('adBack'), pw=document.getElementById('adPw'),
+      msg=document.getElementById('adMsg');
+  function saved(){ try{ return localStorage.getItem('ccrAdminKey')||''; }catch(e){ return ''; } }
+  document.getElementById('adBtn').addEventListener('click',function(){
+    if(saved()){ location.href='admin'; return; }
+    msg.textContent=''; pw.value=''; back.classList.add('open'); pw.focus();
+  });
+  document.getElementById('adCancel').addEventListener('click',function(){back.classList.remove('open');});
+  back.addEventListener('click',function(e){if(e.target===back) back.classList.remove('open');});
+  document.getElementById('adForm').addEventListener('submit',function(e){
+    e.preventDefault();
+    fetch('api/admin/verify',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({password:pw.value})})
+      .then(function(r){
+        if(!r.ok){ msg.textContent='รหัสผ่านไม่ถูกต้อง'; pw.select(); return; }
+        try{ localStorage.setItem('ccrAdminKey',pw.value); }catch(err){}
+        location.href='admin';
+      })['catch'](function(err){ msg.textContent='ติดต่อเซิร์ฟเวอร์ไม่ได้ — '+err.message; });
+  });
 })();
 </script>
 <script>

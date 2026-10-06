@@ -15,6 +15,12 @@ at again later — Railway's filesystem does not survive a deploy.
     POST /api/refresh              run the pipeline for one group and month
     GET  /api/status               progress of the current or last run
     GET  /api/pptx?month=          render the deck for a month already fetched
+    GET  /admin                    which group has which month, and a fetch queue
+    POST /api/admin/verify         check the admin password
+    GET  /api/admin/overview       groups x months that have data, plus the queue
+    GET  /api/admin/jobs           the queue alone, for polling
+    POST /api/admin/jobs           queue [{group, month}] to fetch
+    POST /api/admin/jobs/<id>/retry|cancel|dismiss
 
 The Apify token stays server-side: it is read from $APIFY_TOKEN and never
 reaches the page. Because the site is public, the refresh endpoint is gated on
@@ -27,6 +33,7 @@ Environment:
     DATABASE_URL        Postgres; without it, fetched months die with the box
     AGENCY_API_BASE     Agency Intelligence, for the group and brand lists
     AGENCY_SERVICE_KEY  its REPORT_SERVICE_KEY
+    ADMIN_PASSWORD      what the admin page asks for (default "content")
 
 Run locally:
     APIFY_TOKEN=apify_api_xxx REFRESH_KEY=letmein python3 server.py
@@ -54,6 +61,8 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 PORT = int(os.environ.get("PORT", "8000"))
 APIFY_TOKEN = os.environ.get("APIFY_TOKEN", "").strip()
 REFRESH_KEY = os.environ.get("REFRESH_KEY", "").strip()
+# The admin page queues fetches, so it spends Apify credit like refresh does.
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "content").strip()
 
 PAGE_CACHE = os.environ.get("PAGE_CACHE", "/tmp/ccr_pages")
 PROCESSED = os.environ.get("PROCESSED_JSON", "/tmp/processed_8.json")
@@ -84,6 +93,12 @@ JOB = {
     "log": [],
 }
 JOB_LOCK = threading.Lock()
+
+# The admin queue's worker. PROC is the step running now, so a stuck job can
+# be killed from the page; RESTART holds job ids to requeue once killed.
+WAKE = threading.Event()
+CURRENT = {"job": None, "proc": None}
+RESTART = set()
 
 
 def _log(line):
@@ -343,8 +358,30 @@ def explain(stderr):
 
 # -------------------------------------------------------------------- pipeline
 
-def run_pipeline(group, month, brands):
-    """Execute the pipeline steps in order, then keep what came out."""
+def _run_step(script, env, timeout=3600):
+    """One pipeline step as a child process the admin page can kill."""
+    proc = subprocess.Popen([sys.executable, script], cwd=ROOT, env=env,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    with JOB_LOCK:
+        CURRENT["proc"] = proc
+    try:
+        out, err = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        out, err = proc.communicate()
+        err = (err or "") + "\nใช้เวลานานเกิน %d นาที" % (timeout // 60)
+    finally:
+        with JOB_LOCK:
+            CURRENT["proc"] = None
+    return proc.returncode, out or "", err or ""
+
+
+def run_pipeline(group, month, brands, job_id=None):
+    """Execute the pipeline steps in order, then keep what came out.
+
+    With job_id the admin queue's row is kept in step too, and whatever the
+    steps report spending (their COST_USD lines) is added up onto it.
+    """
     brandset.write(BRANDSET_FILE, group, brands)
     env = dict(os.environ, APIFY_TOKEN=APIFY_TOKEN, REPORT_MONTH=month,
                BRANDSET_JSON=BRANDSET_FILE, DASHBOARD_DATA_JSON=DATA_FILE,
@@ -352,19 +389,28 @@ def run_pipeline(group, month, brands):
                PYTHONUNBUFFERED="1")
     env.pop("DASHBOARD_FROM_DATA", None)      # this run builds a payload, not renders one
     _log("=== %s · เดือน %s · %d แบรนด์ ===" % (group or "(ชุดเดิม)", month, len(brands)))
+    costs = {}
     try:
         for label, script in STEPS:
             with JOB_LOCK:
                 JOB["step"] = label
+            if job_id:
+                store.update_job(job_id, step=label, step_at=True)
             _log("=== %s (%s) ===" % (label, script))
-            proc = subprocess.run(
-                [sys.executable, script],
-                cwd=ROOT, env=env, capture_output=True, text=True, timeout=3600,
-            )
-            for line in (proc.stdout or "").splitlines()[-40:]:
+            code, out, err = _run_step(script, env)
+            for line in out.splitlines():
+                if line.startswith("COST_USD "):
+                    bits = line.split()
+                    try:
+                        costs[bits[2] if len(bits) > 2 else script] = float(bits[1])
+                    except (IndexError, ValueError):
+                        pass
+            for line in out.splitlines()[-40:]:
                 _log(line)
-            if proc.returncode != 0:
-                raise RuntimeError("%s ล้มเหลว — %s" % (script, explain(proc.stderr)))
+            if job_id in RESTART:
+                raise RuntimeError("ยกเลิกเพื่อเริ่มใหม่")
+            if code != 0:
+                raise RuntimeError("%s ล้มเหลว — %s" % (script, explain(err)))
         with JOB_LOCK:
             JOB["step"] = "บันทึกลงฐานข้อมูล"
         with open(DATA_FILE, encoding="utf-8") as f:
@@ -374,15 +420,102 @@ def run_pipeline(group, month, brands):
         with JOB_LOCK:
             JOB["step"] = "เสร็จสมบูรณ์"
             JOB["error"] = ""
+        if job_id:
+            store.update_job(job_id, status="done", step="เสร็จสมบูรณ์", error="",
+                             cost_usd=round(sum(costs.values()), 4) if costs else None,
+                             cost_detail=costs, finished_at=True)
     except Exception as exc:                      # surfaced to the page as-is
         _log("ERROR: %s" % exc)
         with JOB_LOCK:
             JOB["error"] = str(exc)
             JOB["step"] = "ล้มเหลว"
+        if job_id in RESTART:
+            RESTART.discard(job_id)
+            store.update_job(job_id, status="queued", step="", error="",
+                             started_at=None, step_at=None, finished_at=None)
+        elif job_id:
+            # Steps that did run were still billed, so the cost goes on record.
+            store.update_job(job_id, status="failed", error=str(exc),
+                             cost_usd=round(sum(costs.values()), 4) if costs else None,
+                             cost_detail=costs, finished_at=True)
     finally:
         with JOB_LOCK:
             JOB["running"] = False
             JOB["last_finished"] = time.strftime("%Y-%m-%d %H:%M")
+
+
+# ---------------------------------------------------------------- admin queue
+
+def queue_worker():
+    """Run queued admin jobs one at a time, for as long as the server lives.
+
+    The queue is in the database, so it carries on whether or not anyone has
+    the admin page open. It also shares JOB with the dashboard's own refresh
+    button: whichever starts first runs, the other waits its turn.
+    """
+    while True:
+        WAKE.wait(5)
+        WAKE.clear()
+        try:
+            with JOB_LOCK:
+                if JOB["running"]:
+                    continue
+                JOB["running"] = True          # hold the slot while we look
+            job = store.claim_next_job()
+            if not job:
+                with JOB_LOCK:
+                    JOB["running"] = False
+                continue
+            with JOB_LOCK:
+                JOB.update(step="กำลังเริ่ม", error="", log=[], month=job["month"],
+                           group=job["group_id"], started=time.strftime("%Y-%m-%d %H:%M"))
+                CURRENT["job"] = job["id"]
+            try:
+                if not APIFY_TOKEN:
+                    raise RuntimeError("ยังไม่ได้ตั้งค่า APIFY_TOKEN บนเซิร์ฟเวอร์")
+                brands = selected_brands(job["group_id"])
+                if not brands:
+                    raise RuntimeError("กลุ่มนี้ยังไม่มีแบรนด์ที่มีลิงก์ Facebook")
+            except Exception as exc:
+                store.update_job(job["id"], status="failed", error=str(exc), finished_at=True)
+                with JOB_LOCK:
+                    JOB["running"] = False
+                continue
+            run_pipeline(job["group_id"], job["month"], brands, job_id=job["id"])
+        except Exception as exc:
+            print("queue worker:", exc, flush=True)
+            with JOB_LOCK:
+                JOB["running"] = False
+        finally:
+            with JOB_LOCK:
+                CURRENT["job"] = None
+        WAKE.set()                              # straight on to the next one
+
+
+def admin_overview():
+    try:
+        groups = agency_api.groups()
+        agency_error = ""
+    except agency_api.AgencyError as exc:
+        groups, agency_error = [], str(exc)
+    have = store.all_months()
+    known = {g["id"] for g in groups}
+    # A group since removed from Agency Intelligence still has months stored.
+    for gid in have:
+        if gid and gid not in known:
+            groups.append({"id": gid, "name": gid, "color": "", "facebookBrands": None,
+                           "orphan": True})
+    groups.sort(key=lambda g: str(g.get("name") or "").casefold())
+    return {
+        "groups": [dict(g, months=sorted(have.get(g["id"], []))) for g in groups],
+        "agency_error": agency_error,
+        "current_month": month_util.info(time.strftime("%Y-%m"))["iso"],
+        "configured": bool(APIFY_TOKEN),
+        "durable": store.available(),
+        "storage_note": store.why_unavailable(),
+        "average_cost": store.average_cost(),
+        "jobs": store.list_jobs(),
+    }
 
 
 # ------------------------------------------------- commentary for a saved month
@@ -493,6 +626,10 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def _route(self):
         return urllib.parse.urlparse(self.path).path.rstrip("/") or "/"
 
+    def _admin(self):
+        given = self.headers.get("X-Admin-Key", "")
+        return bool(ADMIN_PASSWORD) and hmac.compare_digest(given, ADMIN_PASSWORD)
+
     def _authorised(self):
         """Constant-time check of the shared secret guarding Apify spend."""
         given = self.headers.get("X-Refresh-Key", "")
@@ -562,6 +699,26 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self._send_page(q.get("group", [""])[0].strip(),
                             q.get("month", [""])[0].strip())
             return
+
+        if route == "/admin":
+            with open(os.path.join(ROOT, "admin.html"), "rb") as f:
+                body = f.read()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
+        if route.startswith("/api/admin/"):
+            if not self._admin():
+                self._json(401, {"error": "รหัสผ่าน admin ไม่ถูกต้อง"}); return
+            if route == "/api/admin/overview":
+                self._json(200, admin_overview()); return
+            if route == "/api/admin/jobs":
+                self._json(200, {"jobs": store.list_jobs(),
+                                 "average_cost": store.average_cost()}); return
+            self._json(404, {"error": "not found"}); return
 
         if route.endswith("/api/groups"):
             try:
@@ -644,6 +801,21 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     def do_POST(self):
         route = self._route()
+
+        if route == "/api/admin/verify":
+            try:
+                given = str(self._body().get("password") or "")
+            except Exception:
+                given = ""
+            ok = bool(ADMIN_PASSWORD) and hmac.compare_digest(given, ADMIN_PASSWORD)
+            self._json(200 if ok else 401, {"ok": ok} if ok else {"error": "รหัสผ่านไม่ถูกต้อง"})
+            return
+
+        if route.startswith("/api/admin/"):
+            if not self._admin():
+                self._json(401, {"error": "รหัสผ่าน admin ไม่ถูกต้อง"}); return
+            self._admin_post(route)
+            return
 
         if route.endswith("/brands") and "/api/groups/" in route:
             group = urllib.parse.unquote(route.split("/api/groups/")[1].rsplit("/brands", 1)[0])
@@ -738,6 +910,77 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         self._json(202, {"started": True, "month": month, "group": group,
                          "brands": len(brands)})
 
+    def _admin_post(self, route):
+        if route == "/api/admin/jobs":
+            if not APIFY_TOKEN:
+                self._json(503, {"error": "ยังไม่ได้ตั้งค่า APIFY_TOKEN บนเซิร์ฟเวอร์"}); return
+            try:
+                items = []
+                for it in self._body().get("items") or []:
+                    month = str(it.get("month") or "").strip()
+                    month_util.parse(month)
+                    if month > time.strftime("%Y-%m"):
+                        raise ValueError("เดือน %s ยังมาไม่ถึง" % month)
+                    group = str(it.get("group") or "").strip()
+                    if group:
+                        items.append({"group_id": group, "month": month,
+                                      "group_name": str(it.get("name") or "")[:200]})
+            except ValueError as exc:
+                self._json(400, {"error": str(exc)}); return
+            except Exception:
+                self._json(400, {"error": "อ่านคำขอไม่สำเร็จ"}); return
+            if not items:
+                self._json(400, {"error": "ยังไม่ได้เลือกเดือน"}); return
+            added = store.add_jobs(items)
+            WAKE.set()
+            self._json(202, {"added": len(added), "skipped": len(items) - len(added),
+                             "jobs": store.list_jobs()})
+            return
+
+        parts = route.split("/")        # ['', 'api', 'admin', 'jobs', '<id>', '<action>']
+        if len(parts) == 6 and parts[3] == "jobs":
+            try:
+                job_id = int(parts[4])
+            except ValueError:
+                self._json(400, {"error": "job id ไม่ถูกต้อง"}); return
+            job = store.get_job(job_id)
+            if not job:
+                self._json(404, {"error": "ไม่พบงานนี้"}); return
+            action = parts[5]
+            if action == "retry":
+                if job["status"] == "running":
+                    # Stuck: kill the step in flight; run_pipeline then puts
+                    # the job back in the queue instead of failing it.
+                    with JOB_LOCK:
+                        mine = CURRENT["job"] == job_id
+                        proc = CURRENT["proc"] if mine else None
+                        if mine:
+                            RESTART.add(job_id)
+                    if proc:
+                        proc.kill()
+                    elif not mine:      # orphaned by a restart we did not see
+                        store.update_job(job_id, status="queued", step="", error="")
+                elif job["status"] == "failed":
+                    store.update_job(job_id, status="queued", step="", error="",
+                                     started_at=None, step_at=None, finished_at=None)
+                else:
+                    self._json(409, {"error": "งานนี้ไม่ได้ติดขัด"}); return
+            elif action == "cancel":
+                if job["status"] != "queued":
+                    self._json(409, {"error": "ยกเลิกได้เฉพาะงานที่ยังเข้าคิวอยู่"}); return
+                store.delete_job(job_id)
+            elif action == "dismiss":
+                if job["status"] not in ("done", "failed"):
+                    self._json(409, {"error": "งานนี้ยังไม่จบ"}); return
+                store.update_job(job_id, dismissed=True)
+            else:
+                self._json(404, {"error": "not found"}); return
+            WAKE.set()
+            self._json(200, {"jobs": store.list_jobs()})
+            return
+
+        self._json(404, {"error": "not found"})
+
     def end_headers(self):
         # The dashboard is regenerated in place, so never serve it from cache.
         if not self._route().startswith("/api"):
@@ -749,6 +992,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
 
 store.migrate()
+store.recover_jobs("เซิร์ฟเวอร์รีสตาร์ทระหว่างดึงข้อมูล — กด retry เพื่อดึงใหม่")
+threading.Thread(target=queue_worker, daemon=True).start()
 socketserver.ThreadingTCPServer.allow_reuse_address = True
 handler = functools.partial(Handler, directory=ROOT)
 with socketserver.ThreadingTCPServer(("0.0.0.0", PORT), handler) as httpd:

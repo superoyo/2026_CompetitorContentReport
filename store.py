@@ -16,6 +16,8 @@ with the container in production — the API says so rather than pretending.
     ccr_reports    the processed numbers a dashboard renders from
     ccr_selection  which brands the user ticked for a group, so the next
                    visit opens on the same set instead of asking again
+    ccr_jobs       the admin page's fetch queue — kept here, not in memory, so
+                   closing the page or redeploying does not lose what was asked
 """
 import datetime
 import json
@@ -97,6 +99,22 @@ CREATE TABLE IF NOT EXISTS ccr_selection (
   brands     JSONB NOT NULL DEFAULT '[]'::jsonb,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+CREATE TABLE IF NOT EXISTS ccr_jobs (
+  id          BIGSERIAL PRIMARY KEY,
+  group_id    TEXT NOT NULL,
+  group_name  TEXT NOT NULL DEFAULT '',
+  month       TEXT NOT NULL,
+  status      TEXT NOT NULL DEFAULT 'queued',
+  step        TEXT NOT NULL DEFAULT '',
+  error       TEXT NOT NULL DEFAULT '',
+  cost_usd    DOUBLE PRECISION,
+  cost_detail JSONB NOT NULL DEFAULT '{}'::jsonb,
+  dismissed   BOOLEAN NOT NULL DEFAULT false,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  started_at  TIMESTAMPTZ,
+  step_at     TIMESTAMPTZ,
+  finished_at TIMESTAMPTZ
+);
 """
 
 
@@ -146,7 +164,7 @@ def _file():
         with open(FALLBACK, encoding="utf-8") as f:
             return json.load(f)
     except Exception:
-        return {"reports": {}, "selection": {}}
+        return {"reports": {}, "selection": {}, "jobs": [], "job_seq": 0}
 
 
 def _write_file(blob):
@@ -236,6 +254,24 @@ def months(group_id):
     return sorted(out, key=lambda x: x["month"], reverse=True)
 
 
+def all_months():
+    """{group_id: [month, ...]} for every group — the admin grid in one query."""
+    out = {}
+    if available():
+        try:
+            with _connect() as con:
+                rows = con.execute("SELECT group_id, month FROM ccr_reports").fetchall()
+            for gid, mon in rows:
+                out.setdefault(gid, []).append(mon)
+            return out
+        except Exception as exc:
+            _degrade(exc)
+    for key in _file()["reports"]:
+        gid, _, mon = key.partition("|")
+        out.setdefault(gid, []).append(mon)
+    return out
+
+
 def delete_report(group_id, month):
     if available():
         try:
@@ -287,3 +323,216 @@ def load_selection(group_id):
         except Exception as exc:
             _degrade(exc)
     return _file()["selection"].get(group_id)
+
+
+# ------------------------------------------------------------------------- jobs
+#
+# A job is one (group, month) to fetch. status runs queued -> running -> done,
+# or -> failed, from where retry puts it back to queued. Only one job runs at a
+# time: every pipeline step reads and writes the same files under /tmp.
+
+JOB_COLS = ("id", "group_id", "group_name", "month", "status", "step", "error",
+            "cost_usd", "cost_detail", "dismissed", "created_at", "started_at",
+            "step_at", "finished_at")
+_TIMES = ("created_at", "started_at", "step_at", "finished_at")
+
+
+def _now():
+    return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
+
+
+def _job_row(row):
+    job = dict(zip(JOB_COLS, row))
+    for k in _TIMES:
+        if job[k] is not None and not isinstance(job[k], str):
+            job[k] = job[k].isoformat(timespec="seconds")
+    return job
+
+
+def _sql_cols():
+    return ", ".join(JOB_COLS)
+
+
+def add_jobs(items):
+    """Queue [{group_id, group_name, month}]. A pair already waiting or running
+    is skipped rather than fetched twice. Returns the jobs actually queued."""
+    added = []
+    if available():
+        try:
+            with _connect() as con:
+                for it in items:
+                    busy = con.execute(
+                        "SELECT 1 FROM ccr_jobs WHERE group_id = %s AND month = %s "
+                        "AND status IN ('queued', 'running')",
+                        (it["group_id"], it["month"])).fetchone()
+                    if busy:
+                        continue
+                    row = con.execute(
+                        "INSERT INTO ccr_jobs (group_id, group_name, month) "
+                        "VALUES (%s, %s, %s) RETURNING " + _sql_cols(),
+                        (it["group_id"], it.get("group_name") or "", it["month"])).fetchone()
+                    added.append(_job_row(row))
+            return added
+        except Exception as exc:
+            _degrade(exc)
+    with _LOCK:
+        blob = _file()
+        jobs = blob.setdefault("jobs", [])
+        for it in items:
+            if any(j["group_id"] == it["group_id"] and j["month"] == it["month"]
+                   and j["status"] in ("queued", "running") for j in jobs):
+                continue
+            blob["job_seq"] = blob.get("job_seq", 0) + 1
+            job = dict.fromkeys(JOB_COLS)
+            job.update(id=blob["job_seq"], group_id=it["group_id"],
+                       group_name=it.get("group_name") or "", month=it["month"],
+                       status="queued", step="", error="", cost_detail={},
+                       dismissed=False, created_at=_now())
+            jobs.append(job)
+            added.append(dict(job))
+        _write_file(blob)
+    return added
+
+
+def list_jobs():
+    """Every job still on show: the unfinished ones and those not yet dismissed."""
+    if available():
+        try:
+            with _connect() as con:
+                rows = con.execute(
+                    "SELECT " + _sql_cols() + " FROM ccr_jobs "
+                    "WHERE NOT dismissed ORDER BY id DESC LIMIT 200").fetchall()
+            return [_job_row(r) for r in reversed(rows)]
+        except Exception as exc:
+            _degrade(exc)
+    return [j for j in _file().get("jobs", []) if not j.get("dismissed")][-200:]
+
+
+def get_job(job_id):
+    if available():
+        try:
+            with _connect() as con:
+                row = con.execute("SELECT " + _sql_cols() + " FROM ccr_jobs WHERE id = %s",
+                                  (job_id,)).fetchone()
+            return _job_row(row) if row else None
+        except Exception as exc:
+            _degrade(exc)
+    for j in _file().get("jobs", []):
+        if j["id"] == job_id:
+            return dict(j)
+    return None
+
+
+def update_job(job_id, **fields):
+    """Set columns on one job. Timestamps given as True mean "now"."""
+    for k in _TIMES:
+        if fields.get(k) is True:
+            fields[k] = _now()
+    if not fields:
+        return
+    if available():
+        try:
+            sets, vals = [], []
+            for k, v in fields.items():
+                if k not in JOB_COLS or k == "id":
+                    raise ValueError("unknown job column %s" % k)
+                if k in _TIMES and v is not None:
+                    sets.append("%s = now()" % k)      # the database's clock, not ours
+                elif k == "cost_detail":
+                    sets.append("cost_detail = %s::jsonb")
+                    vals.append(json.dumps(v, ensure_ascii=False))
+                else:
+                    sets.append("%s = %%s" % k)
+                    vals.append(v)
+            with _connect() as con:
+                con.execute("UPDATE ccr_jobs SET %s WHERE id = %%s" % ", ".join(sets),
+                            vals + [job_id])
+            return
+        except ValueError:
+            raise
+        except Exception as exc:
+            _degrade(exc)
+    with _LOCK:
+        blob = _file()
+        for j in blob.get("jobs", []):
+            if j["id"] == job_id:
+                j.update(fields)
+        _write_file(blob)
+
+
+def claim_next_job():
+    """Move the oldest queued job to running and return it, or None."""
+    if available():
+        try:
+            with _connect() as con:
+                row = con.execute(
+                    "UPDATE ccr_jobs SET status = 'running', step = 'กำลังเริ่ม', error = '', "
+                    "started_at = now(), step_at = now(), finished_at = NULL "
+                    "WHERE id = (SELECT id FROM ccr_jobs WHERE status = 'queued' "
+                    "ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED) RETURNING " + _sql_cols()
+                ).fetchone()
+            return _job_row(row) if row else None
+        except Exception as exc:
+            _degrade(exc)
+    with _LOCK:
+        blob = _file()
+        for j in blob.get("jobs", []):
+            if j["status"] == "queued":
+                now = _now()
+                j.update(status="running", step="กำลังเริ่ม", error="",
+                         started_at=now, step_at=now, finished_at=None)
+                _write_file(blob)
+                return dict(j)
+    return None
+
+
+def delete_job(job_id):
+    if available():
+        try:
+            with _connect() as con:
+                con.execute("DELETE FROM ccr_jobs WHERE id = %s", (job_id,))
+            return
+        except Exception as exc:
+            _degrade(exc)
+    with _LOCK:
+        blob = _file()
+        blob["jobs"] = [j for j in blob.get("jobs", []) if j["id"] != job_id]
+        _write_file(blob)
+
+
+def recover_jobs(reason):
+    """At boot nothing can be running: a job still marked so was cut off by the
+    restart. Fail it with a reason rather than rerun it unasked — a rerun
+    spends Apify credit, so that is the user's call via retry."""
+    if available():
+        try:
+            with _connect() as con:
+                con.execute("UPDATE ccr_jobs SET status = 'failed', error = %s, "
+                            "finished_at = now() WHERE status = 'running'", (reason,))
+            return
+        except Exception as exc:
+            _degrade(exc)
+    with _LOCK:
+        blob = _file()
+        for j in blob.get("jobs", []):
+            if j["status"] == "running":
+                j.update(status="failed", error=reason, finished_at=_now())
+        _write_file(blob)
+
+
+def average_cost(limit=20):
+    """Mean cost of recent finished fetches, for the estimate shown before
+    queuing more. None until something has finished with a known cost."""
+    if available():
+        try:
+            with _connect() as con:
+                row = con.execute(
+                    "SELECT avg(cost_usd), count(*) FROM (SELECT cost_usd FROM ccr_jobs "
+                    "WHERE status = 'done' AND cost_usd IS NOT NULL "
+                    "ORDER BY id DESC LIMIT %s) t", (limit,)).fetchone()
+            return float(row[0]) if row and row[1] else None
+        except Exception as exc:
+            _degrade(exc)
+    got = [j["cost_usd"] for j in _file().get("jobs", [])
+           if j["status"] == "done" and j.get("cost_usd") is not None][-limit:]
+    return sum(got) / len(got) if got else None

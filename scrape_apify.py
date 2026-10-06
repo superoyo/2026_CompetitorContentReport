@@ -52,6 +52,10 @@ while True:
     if st in ("SUCCEEDED", "FAILED", "ABORTED", "TIMED-OUT"):
         break
 
+# What Apify charged for this run; the server adds these up per job.
+if info["data"].get("usageTotalUsd") is not None:
+    print("COST_USD %.4f apify-posts" % info["data"]["usageTotalUsd"], flush=True)
+
 items = api("GET", f"https://api.apify.com/v2/datasets/{ds_id}/items?token={TOKEN}&clean=true&format=json")
 print("ITEMS", len(items), flush=True)
 json.dump(items, open("/tmp/fb_raw_8.json", "w"), ensure_ascii=False)

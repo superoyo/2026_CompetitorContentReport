@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin — ข้อมูลรายเดือน</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Prompt:wght@400;500;600;700;800&family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
+<!-- Served by server.py at /admin. Which Product Group has which month stored,
+     and a queue for fetching the missing ones. The queue lives in the
+     database and is worked by the server, so this page is only a window onto
+     it: close it and the fetches carry on; reopen it and they are still here. -->
+<style>
+  :root{
+    --bg:#F5F6F8; --panel:#FFFFFF; --panel2:#F4F6F9; --line:#E7EAEF;
+    --txt:#1A2333; --muted:#7C8797; --blue:#1877F2; --blue-soft:#E7F0FE;
+    --green:#0B7B57; --green-soft:#DDF4EA; --amber:#9A5B00; --amber-soft:#FFF3DF;
+    --red:#C62828; --red-soft:#FDECEC; --gray:#E3E7ED; --gray-txt:#9AA5B1;
+    --shadow:0 1px 2px rgba(16,24,40,.04),0 4px 16px rgba(16,24,40,.05);
+    --head:'Prompt',sans-serif; --body:'Sarabun',sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:var(--body);background:var(--bg);color:var(--txt);
+    padding:30px 40px 120px;max-width:1360px;margin:0 auto;-webkit-font-smoothing:antialiased}
+  h1,h2,h3,button,input,.mo,.nm{font-family:var(--head)}
+  button{cursor:pointer}
+
+  .head{display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:14px;margin-bottom:22px}
+  .back{font-family:var(--head);font-size:13px;font-weight:700;color:var(--muted);text-decoration:none}
+  .back:hover{color:var(--blue)}
+  h1{font-size:28px;font-weight:800;letter-spacing:-.4px;margin-top:8px}
+  .sub{color:var(--muted);font-size:14px;margin-top:6px}
+  .tools{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .yr{display:flex;align-items:center;gap:4px;background:var(--panel);border:1px solid var(--line);
+    border-radius:999px;padding:4px;box-shadow:var(--shadow)}
+  .yr b{font-family:var(--head);font-size:14px;min-width:84px;text-align:center}
+  .yr button{border:none;background:none;width:30px;height:30px;border-radius:50%;font-size:18px;color:#3B4654}
+  .yr button:hover:not(:disabled){background:var(--blue-soft);color:var(--blue)}
+  .yr button:disabled{opacity:.3;cursor:default}
+  .find{font-size:13px;border:1px solid var(--line);border-radius:999px;padding:9px 15px;width:220px;
+    background:var(--panel);box-shadow:var(--shadow);outline:none;color:var(--txt)}
+  .find:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(24,119,242,.15)}
+
+  .warn{background:var(--amber-soft);border:1px solid #F6E2BE;color:#7A5A22;border-radius:12px;
+    padding:10px 14px;font-size:13px;margin-bottom:14px}
+  .warn.err{background:var(--red-soft);border-color:#F5C6C6;color:var(--red)}
+
+  .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12.5px;color:var(--muted);margin:0 0 12px}
+  .legend span{display:flex;align-items:center;gap:6px}
+  .legend i{width:14px;height:14px;border-radius:4px;display:inline-block}
+
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow);overflow:hidden}
+  .scroll{overflow-x:auto}
+  table{border-collapse:separate;border-spacing:0;width:100%;min-width:860px}
+  th,td{padding:6px 5px;text-align:center;border-bottom:1px solid var(--line)}
+  thead th{font-family:var(--head);font-size:12px;font-weight:700;color:var(--muted);padding:12px 5px;
+    background:var(--panel2);position:sticky;top:0}
+  th.g,td.g{text-align:left;padding-left:18px;position:sticky;left:0;background:var(--panel);z-index:1;min-width:210px}
+  thead th.g{background:var(--panel2);z-index:2}
+  tbody tr:last-child td{border-bottom:none}
+  tbody tr:hover td{background:#FAFBFC}
+  .nm{font-size:14px;font-weight:700;display:flex;align-items:center;gap:8px}
+  .dot{width:10px;height:10px;border-radius:50%;flex:none;background:#C6CED8}
+  .meta{font-size:11.5px;color:var(--muted);margin:2px 0 0 18px}
+
+  .c{width:100%;min-width:52px;height:38px;border-radius:9px;border:2px solid transparent;
+    font-family:var(--head);font-size:12px;font-weight:700;display:flex;align-items:center;
+    justify-content:center;gap:4px;transition:transform .1s, box-shadow .1s}
+  .c.has{background:var(--green-soft);color:var(--green)}
+  .c.has:hover{box-shadow:inset 0 0 0 2px var(--green)}
+  .c.none{background:var(--gray);color:var(--gray-txt)}
+  .c.none:hover{box-shadow:inset 0 0 0 2px #B8C1CC;color:#5A6675}
+  .c.pick{background:var(--blue-soft);border-color:var(--blue);color:var(--blue)}
+  .c.queued{background:var(--amber-soft);color:var(--amber);cursor:default}
+  .c.running{background:var(--blue);color:#fff;cursor:default}
+  .c.failed{background:var(--red-soft);color:var(--red)}
+  .c.failed:hover{box-shadow:inset 0 0 0 2px var(--red)}
+  .c.future,.c.off{background:repeating-linear-gradient(135deg,#F4F6F9 0 6px,#ECEFF3 6px 12px);
+    color:transparent;cursor:not-allowed}
+  .spin{width:11px;height:11px;border:2px solid rgba(255,255,255,.45);border-top-color:#fff;
+    border-radius:50%;animation:sp 0.9s linear infinite}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  .empty{padding:40px;text-align:center;color:var(--muted);font-size:14px}
+
+  /* selection bar: always in place (so picking a cell never shifts the grid
+     under the pointer), and sticks to the top while scrolling */
+  .selbar{position:sticky;top:10px;z-index:20;display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+    background:#1B2430;color:#fff;border-radius:14px;padding:10px 12px 10px 18px;margin-bottom:12px;
+    box-shadow:0 10px 30px rgba(16,24,40,.25)}
+  .selbar:not(.on){background:var(--panel);color:var(--muted);border:1px dashed #C9D1DB;box-shadow:none}
+  .selbar:not(.on) .btn{visibility:hidden}
+  .selbar .t{font-family:var(--head);font-weight:700;font-size:14px;flex:1;min-width:180px}
+  .selbar .t small{display:block;font-family:var(--body);font-weight:400;font-size:12px;opacity:.7}
+  .btn{border:none;border-radius:999px;padding:9px 16px;font-family:var(--head);font-size:13px;font-weight:700}
+  .btn.ghost{background:rgba(255,255,255,.12);color:#fff}
+  .btn.ghost:hover{background:rgba(255,255,255,.2)}
+  .btn.pri{background:var(--blue);color:#fff}
+  .btn.pri:hover{background:#0F66D8}
+  .btn.pri:disabled{opacity:.5;cursor:progress}
+  .btn.line{background:var(--panel);border:1px solid var(--line);color:#3B4654}
+
+  /* modal */
+  .back-dim{position:fixed;inset:0;background:rgba(16,24,40,.45);display:none;align-items:center;
+    justify-content:center;z-index:100;padding:16px}
+  .back-dim.open{display:flex}
+  .modal{background:var(--panel);border-radius:18px;padding:24px;width:100%;max-width:440px;
+    box-shadow:0 24px 60px rgba(16,24,40,.3);max-height:90vh;display:flex;flex-direction:column}
+  .modal h3{font-size:18px;font-weight:800}
+  .modal p{font-size:13.5px;color:#5A6675;margin-top:8px;line-height:1.6}
+  .modal ul{list-style:none;margin:14px 0;overflow:auto;border:1px solid var(--line);border-radius:12px}
+  .modal li{display:flex;justify-content:space-between;padding:9px 13px;font-size:13.5px;border-bottom:1px solid var(--line)}
+  .modal li:last-child{border-bottom:none}
+  .modal li b{font-family:var(--head)}
+  .modal .est{background:var(--panel2);border-radius:10px;padding:10px 13px;font-size:13px;color:#3B4654}
+  .modal .acts{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}
+  .modal input{width:100%;margin-top:14px;font-size:15px;border:1px solid var(--line);border-radius:10px;
+    padding:11px 13px;outline:none}
+  .modal input:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(24,119,242,.15)}
+  .modal .msg{color:var(--red);font-size:12.5px;min-height:18px;margin-top:6px}
+
+  /* the job tray, bottom right */
+  .tray{position:fixed;right:16px;bottom:16px;z-index:50;width:340px;max-width:calc(100vw - 32px);
+    background:var(--panel);border:1px solid var(--line);border-radius:16px;
+    box-shadow:0 14px 40px rgba(16,24,40,.2);display:none;overflow:hidden}
+  .tray.on{display:block}
+  .tray-h{display:flex;align-items:center;gap:8px;padding:11px 14px;background:#1B2430;color:#fff;
+    font-family:var(--head);font-size:13px;font-weight:700;cursor:pointer;user-select:none}
+  .tray-h .s{flex:1}
+  .tray-h .s small{font-weight:500;opacity:.7;margin-left:6px}
+  .tray-h .car{transition:transform .15s}
+  .tray.min .tray-h .car{transform:rotate(180deg)}
+  .tray.min .tray-b{display:none}
+  .tray-b{max-height:min(420px,60vh);overflow:auto}
+  .job{padding:10px 14px;border-bottom:1px solid var(--line);font-size:12.5px}
+  .job:last-child{border-bottom:none}
+  .job .top{display:flex;align-items:center;gap:8px}
+  .job .top b{font-family:var(--head);font-size:13px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .chip{font-family:var(--head);font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px;white-space:nowrap}
+  .chip.queued{background:var(--amber-soft);color:var(--amber)}
+  .chip.running{background:var(--blue-soft);color:var(--blue)}
+  .chip.done{background:var(--green-soft);color:var(--green)}
+  .chip.failed{background:var(--red-soft);color:var(--red)}
+  .job .det{color:var(--muted);margin-top:4px;line-height:1.5;word-break:break-word}
+  .job .det.err{color:var(--red)}
+  .job .row{display:flex;gap:6px;margin-top:7px}
+  .mini{border:1px solid var(--line);background:var(--panel);border-radius:999px;padding:4px 11px;
+    font-family:var(--head);font-size:11.5px;font-weight:700;color:#3B4654}
+  .mini:hover{border-color:var(--blue);color:var(--blue)}
+  .mini.retry{background:var(--red);border-color:var(--red);color:#fff}
+  .mini.retry:hover{background:#A91F1F;color:#fff}
+  .x{border:none;background:none;color:var(--gray-txt);font-size:15px;line-height:1;padding:2px 4px}
+  .x:hover{color:var(--txt)}
+  .bar{height:3px;background:var(--blue-soft);border-radius:3px;margin-top:7px;overflow:hidden}
+  .bar i{display:block;height:100%;background:var(--blue);border-radius:3px;transition:width .4s}
+
+  @media (max-width:700px){
+    body{padding:20px 16px 120px}
+    h1{font-size:22px}
+    .find{width:100%}
+    .tools{width:100%}
+  }
+</style>
+</head>
+<body>
+  <div class="head">
+    <div>
+      <a class="back" href="./">← กลับไป Dashboard</a>
+      <h1>Admin · ข้อมูลรายเดือน</h1>
+      <div class="sub">แต่ละกลุ่มมีข้อมูลเดือนไหนแล้ว — กดช่องสีเทาเพื่อเลือกเดือนที่จะดึง เลือกได้หลายช่อง</div>
+    </div>
+    <div class="tools">
+      <input class="find" id="find" type="search" placeholder="ค้นหากลุ่ม…" autocomplete="off">
+      <div class="yr">
+        <button id="yrPrev" type="button" aria-label="ปีก่อนหน้า">&lsaquo;</button>
+        <b id="yrLbl">—</b>
+        <button id="yrNext" type="button" aria-label="ปีถัดไป">&rsaquo;</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="warns"></div>
+
+  <div class="legend">
+    <span><i style="background:var(--green-soft);box-shadow:inset 0 0 0 1px #9ED8BF"></i>มีข้อมูลแล้ว (กดเพื่อเปิดดู)</span>
+    <span><i style="background:var(--gray)"></i>ยังไม่มีข้อมูล</span>
+    <span><i style="background:var(--blue-soft);box-shadow:inset 0 0 0 2px var(--blue)"></i>เลือกไว้</span>
+    <span><i style="background:var(--amber-soft)"></i>เข้าคิว</span>
+    <span><i style="background:var(--blue)"></i>กำลังดึง</span>
+    <span><i style="background:var(--red-soft)"></i>ล้มเหลว</span>
+  </div>
+
+  <div class="selbar" id="selbar">
+    <div class="t" id="selTxt">—</div>
+    <button class="btn ghost" id="selClear" type="button">ล้าง</button>
+    <button class="btn pri" id="selGo" type="button">ดึงข้อมูล</button>
+  </div>
+
+  <div class="card"><div class="scroll" id="grid"><div class="empty">กำลังโหลด…</div></div></div>
+
+  <!-- password -->
+  <div class="back-dim" id="gate">
+    <form class="modal" id="gateForm">
+      <h3>เข้าเมนู Admin</h3>
+      <p>พิมพ์รหัสผ่านเพื่อเข้าใช้งาน</p>
+      <input id="gatePw" type="password" autocomplete="current-password" placeholder="รหัสผ่าน">
+      <div class="msg" id="gateMsg"></div>
+      <div class="acts">
+        <a class="btn line" href="./" style="text-decoration:none">กลับ</a>
+        <button class="btn pri" type="submit">เข้าสู่ระบบ</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- confirm -->
+  <div class="back-dim" id="ask">
+    <div class="modal">
+      <h3 id="askTitle">ยืนยันการดึงข้อมูล</h3>
+      <p id="askSub">—</p>
+      <ul id="askList"></ul>
+      <div class="est" id="askEst">—</div>
+      <div class="msg" id="askMsg"></div>
+      <div class="acts">
+        <button class="btn line" id="askNo" type="button">ยกเลิก</button>
+        <button class="btn pri" id="askYes" type="button">ยืนยัน ดึงข้อมูล</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="tray" id="tray">
+    <div class="tray-h" id="trayH">
+      <span class="s" id="trayS">งานดึงข้อมูล</span><span class="car">▾</span>
+    </div>
+    <div class="tray-b" id="trayB"></div>
+  </div>
+
+<script>
+(function(){
+  var TH = ["ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.","ก.ค.","ส.ค.","ก.ย.","ต.ค.","พ.ย.","ธ.ค."];
+  var STEPS = ["ดึงโพสต์จาก Apify","ดึงจำนวนผู้ติดตาม","ประมวลผลและดาวน์โหลดรูป",
+               "ครอปรูปสัดส่วน 4:5","เขียนบทวิเคราะห์","สร้างสไลด์ PPTX","สร้าง dashboard"];
+  var STUCK_MIN = 20;          // a step this long with no progress gets a retry button
+  var KEY_NAME = 'ccrAdminKey';
+
+  var $ = function(id){return document.getElementById(id);};
+  var key = '', data = null, jobs = [], avg = null, picked = {}, year = 0, timer = null;
+
+  function store(k, v){ try{ v==null ? localStorage.removeItem(k) : localStorage.setItem(k, v); }catch(e){} }
+  function load(k){ try{ return localStorage.getItem(k) || ''; }catch(e){ return ''; } }
+  function esc(t){ return String(t==null?'':t).replace(/[&<>"']/g,function(c){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
+  function mLabel(iso){ var y=+iso.slice(0,4), m=+iso.slice(5,7); return TH[m-1]+' '+(y+543); }
+  function usd(n){ return n==null ? '—' : '$' + (n < 0.1 ? n.toFixed(3) : n.toFixed(2)); }
+  function mins(iso){ return iso ? Math.max(0, (Date.now() - Date.parse(iso)) / 60000) : 0; }
+  function ago(iso){
+    var m = Math.round(mins(iso));
+    return m < 1 ? 'เมื่อสักครู่' : m < 60 ? m+' นาที' : Math.floor(m/60)+' ชม. '+(m%60)+' นาที';
+  }
+
+  function api(method, path, body){
+    return fetch('api/admin/'+path, {
+      method: method, cache: 'no-store',
+      headers: {'Content-Type':'application/json', 'X-Admin-Key': key},
+      body: body ? JSON.stringify(body) : undefined
+    }).then(function(r){
+      return r.json().catch(function(){return {};}).then(function(j){
+        if(r.status === 401){ lock(); throw new Error(j.error || 'ต้องใส่รหัสผ่าน'); }
+        if(!r.ok) throw new Error(j.error || ('HTTP '+r.status));
+        return j;
+      });
+    });
+  }
+
+  /* ---------------- password gate ---------------- */
+  function lock(){
+    key = ''; store(KEY_NAME, null);
+    clearTimeout(timer);
+    $('gate').classList.add('open'); $('gatePw').value=''; $('gatePw').focus();
+  }
+  $('gateForm').addEventListener('submit', function(e){
+    e.preventDefault();
+    var pw = $('gatePw').value;
+    $('gateMsg').textContent = '';
+    fetch('api/admin/verify', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({password: pw})})
+      .then(function(r){
+        if(!r.ok){ $('gateMsg').textContent = 'รหัสผ่านไม่ถูกต้อง'; $('gatePw').select(); return; }
+        key = pw; store(KEY_NAME, pw);
+        $('gate').classList.remove('open');
+        start();
+      })['catch'](function(err){ $('gateMsg').textContent = 'ติดต่อเซิร์ฟเวอร์ไม่ได้ — '+err.message; });
+  });
+
+  /* ---------------- data ---------------- */
+  function start(){
+    api('GET','overview').then(function(j){
+      data = j; jobs = j.jobs || []; avg = j.average_cost;
+      if(!year) year = +j.current_month.slice(0,4);
+      warns(); grid(); tray(); schedule();
+    })['catch'](function(err){
+      if(key) $('grid').innerHTML = '<div class="empty">โหลดข้อมูลไม่ได้ — '+esc(err.message)+'</div>';
+    });
+  }
+  function warns(){
+    var w = [];
+    if(!data.configured) w.push(['err','ยังไม่ได้ตั้งค่า APIFY_TOKEN บนเซิร์ฟเวอร์ — ดึงข้อมูลไม่ได้จนกว่าจะตั้ง']);
+    if(data.agency_error) w.push(['err','ดึงรายชื่อกลุ่มจาก Agency Intelligence ไม่ได้ — '+data.agency_error]);
+    if(!data.durable) w.push(['','ยังไม่ได้เก็บถาวร ('+(data.storage_note||'ไม่มีฐานข้อมูล')
+      +') — ข้อมูลและคิวงานจะหายเมื่อ deploy ใหม่']);
+    $('warns').innerHTML = w.map(function(x){
+      return '<div class="warn '+x[0]+'">'+esc(x[1])+'</div>'; }).join('');
+  }
+
+  /* Latest job per group|month, so a cell can show it is queued or running. */
+  function jobIndex(){
+    var by = {};
+    jobs.forEach(function(j){ by[j.group_id+'|'+j.month] = j; });
+    return by;
+  }
+
+  function cellState(g, iso, byJob){
+    if(iso > data.current_month) return 'future';
+    var j = byJob[g.id+'|'+iso];
+    if(j && (j.status === 'running' || j.status === 'queued')) return j.status;
+    if(g.months.indexOf(iso) > -1) return 'has';
+    if(g.orphan || g.facebookBrands === 0) return 'off';
+    if(j && j.status === 'failed') return 'failed';
+    return picked[g.id+'|'+iso] ? 'pick' : 'none';
+  }
+
+  function grid(){
+    var q = $('find').value.trim().toLowerCase();
+    var cur = +data.current_month.slice(0,4);
+    $('yrLbl').textContent = (year + 543) + ' (' + year + ')';
+    $('yrNext').disabled = year >= cur;
+    var rows = data.groups.filter(function(g){ return !q || String(g.name).toLowerCase().indexOf(q) > -1; });
+    if(!data.groups.length){
+      $('grid').innerHTML = '<div class="empty">ยังไม่มี Product Group</div>'; return;
+    }
+    if(!rows.length){
+      $('grid').innerHTML = '<div class="empty">ไม่พบกลุ่มที่ชื่อมี “'+esc($('find').value.trim())+'”</div>'; return;
+    }
+    var byJob = jobIndex(), months = [];
+    for(var m=1; m<=12; m++) months.push(year+'-'+(m<10?'0':'')+m);
+    var h = '<table><thead><tr><th class="g">Product Group</th>'
+      + months.map(function(iso){ return '<th>'+TH[+iso.slice(5)-1]+'</th>'; }).join('')
+      + '</tr></thead><tbody>';
+    rows.forEach(function(g){
+      var have = g.months.length;
+      var meta = g.orphan ? 'ไม่อยู่ใน Agency Intelligence แล้ว'
+        : g.facebookBrands === 0 ? 'ยังไม่มีแบรนด์ที่มีลิงก์ Facebook'
+        : (g.facebookBrands != null ? g.facebookBrands+' แบรนด์ · ' : '') + 'มีข้อมูล '+have+' เดือน';
+      h += '<tr><td class="g"><div class="nm"><span class="dot" style="background:'+esc(g.color||'#C6CED8')+'"></span>'
+        + esc(g.name)+'</div><div class="meta">'+esc(meta)+'</div></td>';
+      months.forEach(function(iso){
+        var st = cellState(g, iso, byJob), inner = '', tip = esc(g.name)+' · '+mLabel(iso);
+        if(st === 'has'){ inner = '✓'; tip += ' — มีข้อมูลแล้ว กดเพื่อเปิด'; }
+        else if(st === 'queued'){ inner = 'คิว'; tip += ' — เข้าคิว'; }
+        else if(st === 'running'){ inner = '<span class="spin"></span>'; tip += ' — กำลังดึง'; }
+        else if(st === 'failed'){ inner = '!'; tip += ' — ล้มเหลว กดเพื่อลองใหม่'; }
+        else if(st === 'pick'){ inner = '✓'; tip += ' — เลือกไว้'; }
+        else if(st === 'none'){ inner = '+'; tip += ' — ยังไม่มีข้อมูล กดเพื่อเลือก'; }
+        h += '<td><button class="c '+st+'" type="button" title="'+tip+'" data-g="'+esc(g.id)
+          + '" data-m="'+iso+'"'+(st==='future'||st==='off'?' disabled':'')+'>'+inner+'</button></td>';
+      });
+      h += '</tr>';
+    });
+    $('grid').innerHTML = h + '</tbody></table>';
+    selbar();
+  }
+
+  $('grid').addEventListener('click', function(e){
+    var b = e.target.closest ? e.target.closest('.c') : null;
+    if(!b || b.disabled) return;
+    var gid = b.getAttribute('data-g'), iso = b.getAttribute('data-m'), k = gid+'|'+iso;
+    if(b.classList.contains('has')){
+      window.open('./?group='+encodeURIComponent(gid)+'&month='+iso, '_blank'); return;
+    }
+    if(b.classList.contains('failed')){
+      var j = jobIndex()[k];
+      if(j) act(j.id, 'retry');
+      return;
+    }
+    if(b.classList.contains('none') || b.classList.contains('pick')){
+      if(picked[k]) delete picked[k]; else picked[k] = true;
+      grid();
+    }
+  });
+  $('find').addEventListener('input', grid);
+  $('yrPrev').addEventListener('click', function(){ year--; grid(); });
+  $('yrNext').addEventListener('click', function(){ year++; grid(); });
+
+  /* ---------------- selection + confirm ---------------- */
+  function pickedList(){
+    var names = {}; data.groups.forEach(function(g){ names[g.id] = g.name; });
+    return Object.keys(picked).sort().map(function(k){
+      var p = k.split('|'); return {group: p[0], month: p[1], name: names[p[0]] || p[0]};
+    });
+  }
+  function estimate(n){
+    return avg == null
+      ? 'ค่าใช้จ่ายประมาณการ: ยังไม่มีงานที่ดึงเสร็จให้เทียบ — จะเห็นค่าจริงหลังงานแรกเสร็จ'
+      : 'ค่าใช้จ่ายประมาณการ: ~'+usd(avg*n)+' (เฉลี่ย '+usd(avg)+' ต่อกลุ่มต่อเดือน จากงานที่ผ่านมา)';
+  }
+  function selbar(){
+    var n = Object.keys(picked).length;
+    $('selbar').classList.toggle('on', n > 0);
+    $('selTxt').innerHTML = n ? 'เลือกไว้ '+n+' เดือน<small>'+esc(avg==null?'กดช่องสีเทาเพิ่มได้อีก':
+      'ประมาณ ~'+usd(avg*n)+' · กดช่องสีเทาเพิ่มได้อีก')+'</small>'
+      : 'ยังไม่ได้เลือก<small>กดช่องสีเทาเพื่อเลือกเดือนที่จะดึงข้อมูล เลือกได้หลายช่อง แล้วกด “ดึงข้อมูล”</small>';
+  }
+  $('selClear').addEventListener('click', function(){ picked = {}; grid(); });
+  $('selGo').addEventListener('click', function(){
+    var items = pickedList();
+    if(!items.length) return;
+    $('askSub').textContent = 'จะดึงข้อมูล '+items.length+' รายการ ทีละรายการตามคิว '
+      + 'ปิดหน้านี้ได้ งานยังทำต่อบนเซิร์ฟเวอร์ และกลับมาดูสถานะได้ทุกเมื่อ';
+    $('askList').innerHTML = items.map(function(i){
+      return '<li><b>'+esc(i.name)+'</b><span>'+mLabel(i.month)+'</span></li>'; }).join('');
+    $('askEst').textContent = estimate(items.length);
+    $('askMsg').textContent = '';
+    $('askYes').disabled = false;
+    $('ask').classList.add('open');
+  });
+  function closeAsk(){ $('ask').classList.remove('open'); }
+  $('askNo').addEventListener('click', closeAsk);
+  $('ask').addEventListener('click', function(e){ if(e.target === $('ask')) closeAsk(); });
+  document.addEventListener('keydown', function(e){ if(e.key === 'Escape') closeAsk(); });
+  $('askYes').addEventListener('click', function(){
+    $('askYes').disabled = true;
+    api('POST', 'jobs', {items: pickedList()}).then(function(j){
+      jobs = j.jobs || jobs; picked = {};
+      closeAsk(); $('tray').classList.remove('min');
+      grid(); tray(); schedule(1500);
+    })['catch'](function(err){
+      $('askYes').disabled = false; $('askMsg').textContent = err.message;
+    });
+  });
+
+  /* ---------------- tray ---------------- */
+  function tray(){
+    var active = jobs.filter(function(j){ return j.status==='running' || j.status==='queued'; });
+    var run = jobs.filter(function(j){ return j.status==='running'; }).length;
+    var q = jobs.filter(function(j){ return j.status==='queued'; });
+    var fail = jobs.filter(function(j){ return j.status==='failed'; }).length;
+    $('tray').classList.toggle('on', jobs.length > 0);
+    var bits = [];
+    if(run) bits.push('กำลังดึง '+run); if(q.length) bits.push('คิว '+q.length);
+    if(fail) bits.push('ล้มเหลว '+fail);
+    $('trayS').innerHTML = 'งานดึงข้อมูล<small>'+esc(bits.join(' · ') || 'เสร็จทั้งหมด')+'</small>';
+
+    var order = {running:0, queued:1, failed:2, done:3};
+    var list = jobs.slice().sort(function(a,b){
+      return (order[a.status]-order[b.status]) || (a.status==='done'||a.status==='failed' ? b.id-a.id : a.id-b.id);
+    });
+    $('trayB').innerHTML = list.map(function(j){
+      var title = esc(j.group_name || j.group_id)+' · '+mLabel(j.month), chip, det = '', row = '', x = '';
+      if(j.status === 'queued'){
+        chip = '<span class="chip queued">เข้าคิว #'+(q.indexOf(j)+1)+'</span>';
+        det = '<div class="det">รอให้งานก่อนหน้าเสร็จ</div>';
+        row = '<div class="row"><button class="mini" data-act="cancel" data-id="'+j.id+'">ยกเลิก</button></div>';
+      }else if(j.status === 'running'){
+        var i = STEPS.indexOf(j.step), pct = i < 0 ? 4 : Math.round((i+0.5)/STEPS.length*100);
+        var stuck = mins(j.step_at) > STUCK_MIN;
+        chip = '<span class="chip running">กำลังดึง</span>';
+        det = '<div class="det'+(stuck?' err':'')+'">'+esc(j.step||'กำลังเริ่ม')
+          + (i > -1 ? ' ('+(i+1)+'/'+STEPS.length+')' : '')
+          + ' · ขั้นนี้ '+ago(j.step_at)+(stuck?' — ดูเหมือนติดขัด':'')+'</div>'
+          + '<div class="bar"><i style="width:'+pct+'%"></i></div>';
+        if(stuck) row = '<div class="row"><button class="mini retry" data-act="retry" data-id="'+j.id+'">Retry</button></div>';
+      }else if(j.status === 'done'){
+        chip = '<span class="chip done">Complete</span>';
+        det = '<div class="det">ค่าใช้จ่ายประมาณ <b>'+usd(j.cost_usd)+'</b>'+costDetail(j.cost_detail)
+          + ' · ใช้เวลา '+span(j.started_at, j.finished_at)+'</div>';
+        row = '<div class="row"><a class="mini" style="text-decoration:none" target="_blank" href="./?group='
+          + encodeURIComponent(j.group_id)+'&month='+j.month+'">เปิดดู</a></div>';
+        x = '<button class="x" data-act="dismiss" data-id="'+j.id+'" title="ซ่อน">×</button>';
+      }else{
+        chip = '<span class="chip failed">ล้มเหลว</span>';
+        det = '<div class="det err">'+esc(j.error || 'ไม่ทราบสาเหตุ')+'</div>'
+          + (j.cost_usd != null ? '<div class="det">ใช้ไปแล้วประมาณ <b>'+usd(j.cost_usd)+'</b>'
+            + costDetail(j.cost_detail)+'</div>' : '');
+        row = '<div class="row"><button class="mini retry" data-act="retry" data-id="'+j.id+'">Retry</button></div>';
+        x = '<button class="x" data-act="dismiss" data-id="'+j.id+'" title="ซ่อน">×</button>';
+      }
+      return '<div class="job"><div class="top"><b title="'+title+'">'+title+'</b>'+chip+x+'</div>'+det+row+'</div>';
+    }).join('');
+    return active.length;
+  }
+  function costDetail(d){
+    var names = {'apify-posts':'โพสต์','apify-pages':'ผู้ติดตาม','claude':'บทวิเคราะห์'};
+    var k = Object.keys(d || {});
+    if(!k.length) return '';
+    return ' <span style="opacity:.75">('+k.map(function(n){ return (names[n]||n)+' '+usd(d[n]); }).join(' · ')+')</span>';
+  }
+  function span(a, b){
+    if(!a || !b) return '—';
+    var m = Math.max(0, Math.round((Date.parse(b) - Date.parse(a)) / 60000));
+    return m < 1 ? 'ไม่ถึง 1 นาที' : m+' นาที';
+  }
+  $('trayH').addEventListener('click', function(){ $('tray').classList.toggle('min'); });
+  $('trayB').addEventListener('click', function(e){
+    var b = e.target.closest ? e.target.closest('[data-act]') : null;
+    if(!b) return;
+    act(b.getAttribute('data-id'), b.getAttribute('data-act'));
+  });
+  function act(id, what){
+    if(what === 'retry' && !confirm('ดึงข้อมูลรายการนี้ใหม่อีกครั้ง? (มีค่าใช้จ่าย Apify)')) return;
+    api('POST', 'jobs/'+id+'/'+what).then(function(j){
+      jobs = j.jobs || jobs; grid(); tray(); schedule(1500);
+    })['catch'](function(err){ alert(err.message); });
+  }
+
+  /* ---------------- polling ---------------- */
+  function schedule(ms){
+    clearTimeout(timer);
+    var busy = jobs.some(function(j){ return j.status==='running' || j.status==='queued'; });
+    timer = setTimeout(poll, ms || (busy ? 3000 : 20000));
+  }
+  function poll(){
+    if(!key) return;
+    var before = {};
+    jobs.forEach(function(j){ before[j.id] = j.status; });
+    api('GET', 'jobs').then(function(j){
+      jobs = j.jobs || []; avg = j.average_cost;
+      // A job that just finished changes which months exist: reload the grid's data.
+      var finished = jobs.some(function(x){ return x.status === 'done' && before[x.id] && before[x.id] !== 'done'; });
+      if(finished) return start();
+      grid(); tray(); schedule();
+    })['catch'](function(){ schedule(10000); });
+  }
+  document.addEventListener('visibilitychange', function(){ if(!document.hidden && key) poll(); });
+
+  key = load(KEY_NAME);
+  if(key) start(); else lock();
+})();
+</script>
+</body>
+</html>

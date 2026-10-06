@@ -363,6 +363,8 @@ def main():
     print("เขียนเสร็จ %d เพจ · token เข้า %d ออก %d%s"
           % (len(ai), u.input_tokens, u.output_tokens,
              (" · ประมาณ $%.3f" % cost) if cost is not None else ""), flush=True)
+    if cost is not None:
+        print("COST_USD %.4f claude" % cost, flush=True)
 
     save(P, {"ai": ai, "summary": summary, "keylearning": keylearning,
              "model": MODEL, "month": P.get("month"),

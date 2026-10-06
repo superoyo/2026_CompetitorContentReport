@@ -112,6 +112,8 @@ def main():
             st = info["data"]["status"]
             print("status", st, flush=True)
             if st in ("SUCCEEDED", "FAILED", "ABORTED", "TIMED-OUT"):
+                if info["data"].get("usageTotalUsd") is not None:
+                    print("COST_USD %.4f apify-pages" % info["data"]["usageTotalUsd"], flush=True)
                 break
             if time.time() > deadline:
                 raise RuntimeError("actor ใช้เวลานานเกินกำหนด")
