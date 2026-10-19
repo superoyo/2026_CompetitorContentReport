@@ -422,8 +422,16 @@ for n in notes:
     add_text(s, 1.35, y - 0.06, 10.8, 0.9, n, size=14, color=hx('#E3EEF4'), ls=1.15)
     y += 1.02
 
-# Name the deck after the month; build_dashboard.py links the download button here.
-out = os.path.join(ROOT, "%s_%d_Engagement_Top5.pptx" % (M["en_full"], M["year"]))
+# $DECK_OUT when the caller has already decided where this belongs — the server
+# does, because the path has to carry the group. Naming it after the month
+# alone, as this once did, gave every group the same file: whichever built last
+# owned it and the rest downloaded someone else's brands.
+out = os.environ.get("DECK_OUT", "").strip()
+if not out:
+    slug = "".join(c if (c.isalnum() or c in "-_") else "_"
+                   for c in (P.get("group_id") or "").removeprefix("g_"))[:40]
+    out = os.path.join(ROOT, "%s_%d_%sEngagement_Top5.pptx"
+                       % (M["en_full"], M["year"], slug + "_" if slug else ""))
 if SHARED is None:
     prs.save(out)
     print("saved", out, "slides:", len(prs.slides._sldIdLst))

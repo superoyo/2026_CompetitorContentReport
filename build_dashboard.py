@@ -1369,10 +1369,13 @@ window.FBDASH = {group:'', months:{}, brands:[], ready:false};
              'July','August','September','October','November','December'];
     var target=built, busy=false, handler=null;
 
-    /* Must match the name build_slides.py writes. */
+    /* For the saved file's name only. The deck itself always comes from the
+       API, which is the only side that knows which group is being asked for. */
     function deckName(iso){
       var p=String(iso||'').split('-');
-      return p.length===2 ? ENM[+p[1]-1]+'_'+p[0]+'_Engagement_Top5.pptx' : '';
+      if(p.length!==2) return 'Engagement_Top5.pptx';
+      var g=((window.FBDASH||{}).group||'').replace(/^g_/,'').replace(/[^A-Za-z0-9_-]/g,'_');
+      return ENM[+p[1]-1]+'_'+p[0]+'_'+(g?g+'_':'')+'Engagement_Top5.pptx';
     }
     function note(m){var el=document.getElementById('rfMsg'); if(el) el.textContent=m;}
     function setHandler(fn){
@@ -1416,42 +1419,33 @@ window.FBDASH = {group:'', months:{}, brands:[], ready:false};
       });
     }
 
-    /* Follow the picker: the button always acts on the selected month. */
+    /* Follow the picker: the button always acts on the selected month.
+
+       It used to HEAD a static path built from the month and link to it when
+       something was there. Nothing in that path mentions the group, so the
+       first group to build a deck for a month handed its slides to every
+       other group asking for the same month — the page said PAO and the file
+       was Cellox. Asking the API every time costs a render we were going to
+       do anyway and cannot pick up another group's file. */
     function retarget(iso){
       target=iso||built;
-      var mine=target, file=deckName(mine);
+      var mine=target;
       var stale=function(){return target!==mine;};
       a.classList.remove('off');
       a.removeAttribute('href'); a.removeAttribute('download');
-      a.title='';
       setHandler(null);
       lbl.textContent='PPT '+thaiMonth(mine);
-      if(!file) return;
 
-      fetch(file,{method:'HEAD'}).then(function(r){
-        if(!r.ok) throw new Error('missing');
-        /* A 200 alone is not proof: a host that answers missing paths with an
-           error page would have us link to HTML. Check what it says it is. */
-        if((r.headers.get('Content-Type')||'').indexOf('presentationml')<0)
-          throw new Error('not a deck');
+      fetch('api/status',{cache:'no-store'}).then(function(r){
+        if(!r.ok) throw new Error('no api');
         if(stale()) return;
-        a.setAttribute('href',file); a.setAttribute('download','');
-        var n=parseInt(r.headers.get('Content-Length')||'0',10);
-        lbl.textContent='PPT '+thaiMonth(mine)+(n?mb(n):'');
+        a.title='สร้างสไลด์เดือน'+thaiMonth(mine)+' จากข้อมูลบนเซิร์ฟเวอร์ — ไม่เสียค่า Apify';
+        setHandler(generate);
       })['catch'](function(){
         if(stale()) return;
-        fetch('api/status',{cache:'no-store'}).then(function(r){
-          if(!r.ok) throw new Error('no api');
-          if(stale()) return;
-          lbl.textContent='สร้าง PPT '+thaiMonth(mine);
-          a.title='สร้างสไลด์เดือน'+thaiMonth(mine)+' จากข้อมูลบนเซิร์ฟเวอร์ — ไม่เสียค่า Apify';
-          setHandler(generate);
-        })['catch'](function(){
-          if(stale()) return;
-          a.classList.add('off');
-          lbl.textContent='ไม่มี PPT '+thaiMonth(mine);
-          a.title='หน้านี้เป็นไฟล์นิ่ง — สร้างสไลด์ได้บนเว็บที่รันบน Railway';
-        });
+        a.classList.add('off');
+        lbl.textContent='ไม่มี PPT '+thaiMonth(mine);
+        a.title='หน้านี้เป็นไฟล์นิ่ง — สร้างสไลด์ได้บนเว็บที่รันบน Railway';
       });
     }
 

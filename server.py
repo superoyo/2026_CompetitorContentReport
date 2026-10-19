@@ -237,8 +237,26 @@ def selected_brands(group):
 
 # ----------------------------------------------------------------------- decks
 
-def deck_name(info):
-    return "%s_%d_Engagement_Top5.pptx" % (info["en_full"], info["year"])
+def deck_slug(group):
+    """The group's part of a deck filename. 'g_pao' reads better as 'pao'."""
+    g = (group or "").strip()
+    if g.startswith("g_"):
+        g = g[2:]
+    return "".join(c if (c.isalnum() or c in "-_") else "_" for c in g)[:40]
+
+
+def deck_name(info, group=""):
+    """One file per (group, month).
+
+    The group used to be left out, so every group's September deck wanted the
+    same path. Whichever built last owned the file, and the next group to ask
+    was handed it — a deck titled for one brand set carrying another's. The
+    page linked straight to this name as a static file, so nothing on the way
+    out ever checked whose data it was.
+    """
+    slug = deck_slug(group)
+    return "%s_%d_%sEngagement_Top5.pptx" % (
+        info["en_full"], info["year"], slug + "_" if slug else "")
 
 
 DECK_IMAGES = os.path.join(ROOT, "deck_images")
@@ -295,7 +313,7 @@ def build_deck(month, group=""):
     written at run time is gone but the month itself is not.
     """
     info = month_util.info(month)
-    path = os.path.join(ROOT, deck_name(info))
+    path = os.path.join(ROOT, deck_name(info, group))
     try:
         held = json.load(open(PROCESSED)) if os.path.exists(PROCESSED) else {}
     except Exception:
@@ -324,7 +342,8 @@ def build_deck(month, group=""):
     proc = subprocess.run(
         [sys.executable, "build_slides.py"],
         cwd=ROOT, env=dict(os.environ, REPORT_MONTH=info["iso"],
-                           PROCESSED_JSON=source, PYTHONUNBUFFERED="1"),
+                           PROCESSED_JSON=source, DECK_OUT=path,
+                           PYTHONUNBUFFERED="1"),
         capture_output=True, text=True, timeout=600,
     )
     if proc.returncode != 0 or not os.path.exists(path):
@@ -1045,6 +1064,14 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     "has_processed": os.path.exists(PROCESSED),
                     "log": JOB["log"][-20:],
                 })
+            return
+
+        # Decks are per (group, month) and only /api/pptx knows which group is
+        # being asked for. Serving one as a plain file is how a group ended up
+        # downloading another's slides, so that door stays shut — including for
+        # the group-less files earlier versions left lying in here.
+        if route.endswith(".pptx"):
+            self._json(404, {"error": "ดาวน์โหลดสไลด์ผ่าน /api/pptx?group=&month= เท่านั้น"})
             return
 
         super().do_GET()
