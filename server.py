@@ -783,6 +783,8 @@ def processed_from_payload(group, month, payload):
         "agg": payload.get("agg") or {},
         "metrics": payload.get("metrics") or {},
         "top5": payload.get("top5") or {},
+        # Every post, for the deck's contact sheet. analyse.py ignores it.
+        "all": payload.get("all") or {},
     }
 
 
