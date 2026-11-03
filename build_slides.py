@@ -50,7 +50,7 @@ SLIDE_H = Inches(7.5)
 ROOT = os.path.dirname(os.path.abspath(__file__))
 M = month_util.info()
 P = json.load(open(os.environ.get('PROCESSED_JSON', '/tmp/processed_8.json')))
-AGG = P['agg']; MET = P['metrics']; TOP5 = P['top5']
+AGG = P['agg']; MET = P['metrics']; TOP5 = P['top5']; ALL = P.get('all') or {}
 
 # The set the run actually covered, recorded by process.py. Falling back to
 # brandset.load() keeps a hand-run of this step working against older output.
@@ -163,6 +163,18 @@ def add_text(slide, x, y, w, h, text, size=14, color=TEXT_DARK, bold=False, ital
 def truncate(s, n):
     s = (s or "").strip().replace('\n', ' ')
     return s if len(s) <= n else s[:n].rstrip() + "…"
+
+TH_MON = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.',
+          'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.']
+
+
+def short_date(iso):
+    """'2026-06-04' -> '4 มิ.ย.'; anything unexpected comes back blank."""
+    try:
+        y, m, d = str(iso)[:10].split('-')
+        return "%d %s" % (int(d), TH_MON[int(m) - 1])
+    except Exception:
+        return ""
 
 def fmt(n): return f"{n:,}"
 
@@ -359,6 +371,56 @@ for key in ORDER:
                      % (FMT_TH.get((MET.get(key) or {}).get('best_format'), '—'),
                         (MET.get(key) or {}).get('best_dow') or '—'),
                      size=11, color=MUTED)
+
+    # --- Contact sheet: every post this page put out ---
+    # The Top 5 slide shows what worked; this shows the whole month at a
+    # glance. Thumbnails keep their real proportions, as on the page, so a
+    # vertical clip does not get squared off into looking like a still.
+    posts = [q for q in (ALL.get(key) or [])]
+    if posts:
+        X0, RIGHT = 0.6, 12.73
+        IH, CAP, GAP = 1.0, 0.18, 0.11      # image height, caption, gap
+        TOP, BOTTOM = 1.62, 7.05
+        PITCH = IH + CAP + GAP
+
+        def sheet_slide(part):
+            sl = add_slide(); set_bg(sl, DARK)
+            add_badge(sl, 0.6, 0.5, 0.55, c, LETTER[key], fs=20)
+            add_text(sl, 1.32, 0.46, 9.5, 0.5, display, size=23, color=WHITE,
+                     bold=True, font=HEAD_FONT)
+            add_text(sl, 1.32, 0.98, 10.5, 0.4,
+                     "คอนเทนต์ทั้งหมดในเดือน%s %d · %d โพสต์%s"
+                     % (M['th_full'], M['be_year'], len(posts),
+                        "  (ต่อ %d)" % part if part > 1 else ""),
+                     size=12, color=hx('#9FC9DE'))
+            return sl
+
+        part = 1
+        sl = sheet_slide(part)
+        x, y = X0, TOP
+        for q in posts:
+            pw, ph = q.get('thumb_w') or q.get('w'), q.get('thumb_h') or q.get('h')
+            try:
+                ratio = float(pw) / float(ph)
+            except Exception:
+                ratio = 1.0
+            iw = min(2.4, max(0.5, IH * ratio))
+            if x + iw > RIGHT:                      # next row
+                x, y = X0, y + PITCH
+                if y + IH + CAP > BOTTOM:           # next slide
+                    part += 1
+                    sl = sheet_slide(part)
+                    y = TOP
+            src = q.get('thumb')
+            if src and os.path.exists(src):
+                sl.shapes.add_picture(src, Inches(x), Inches(y), Inches(iw), Inches(IH))
+            else:
+                add_rect(sl, x, y, iw, IH, fill=tint(COLOR[key], 0.82), radius=0.04)
+                add_text(sl, x, y, iw, IH, "ไม่มีรูป", size=8.5, color=MUTED,
+                         align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+            add_text(sl, x, y + IH + 0.02, iw, CAP, short_date(q.get('time')),
+                     size=7.5, color=hx('#7F93AD'), align=PP_ALIGN.CENTER)
+            x += iw + GAP
 
     # --- Analysis + Reco slide ---
     # The prose is written by hand per page in report_config.py. A brand the

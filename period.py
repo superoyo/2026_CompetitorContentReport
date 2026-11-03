@@ -134,24 +134,40 @@ def combine(group, payloads, owned=()):
     }
 
 
-def write_images(top5, img_dir):
-    """Write each top post's inlined image to disk for the deck, in place.
+def _write_uri(uri, path):
+    """A data URI to a file python-pptx can open. True when one was written."""
+    if not (uri or "").startswith("data:image"):
+        return False
+    try:
+        raw = base64.b64decode(uri.split(",", 1)[1])
+    except Exception:
+        return False
+    with open(path, "wb") as f:
+        f.write(raw)
+    return True
+
+
+def write_images(top5, img_dir, every=None):
+    """Write the deck's inlined images to disk, in place.
 
     The stored payload carries images as data URIs; python-pptx wants files.
+    `top5` holds the cards' full-size images, `every` the thumbnails of all
+    posts behind the contact sheet — the same treatment, different field, and
+    kept under distinct names so one cannot overwrite the other.
     """
     os.makedirs(img_dir, exist_ok=True)
     for key, posts in (top5 or {}).items():
         safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in key)
         for i, post in enumerate(posts, 1):
-            post["image_path"] = None
-            uri = post.pop("img", "") or ""
-            if not uri.startswith("data:image"):
-                continue
-            try:
-                raw = base64.b64decode(uri.split(",", 1)[1])
-            except Exception:
-                continue
             fp = os.path.join(img_dir, "%s_%d.jpg" % (safe, i))
-            with open(fp, "wb") as f:
-                f.write(raw)
-            post["image_path"] = fp
+            post["image_path"] = fp if _write_uri(post.pop("img", ""), fp) else None
+
+    for key, posts in (every or {}).items():
+        safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in key)
+        for i, post in enumerate(posts, 1):
+            fp = os.path.join(img_dir, "all_%s_%d.jpg" % (safe, i))
+            post["thumb"] = fp if _write_uri(post.get("thumb"), fp) else None
+            # The page stores the thumbnail's real shape under w/h; the deck
+            # reads thumb_w/thumb_h, as process.py writes them.
+            post.setdefault("thumb_w", post.get("w"))
+            post.setdefault("thumb_h", post.get("h"))

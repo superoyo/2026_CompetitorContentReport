@@ -303,7 +303,8 @@ def deck_shim(group, month):
 
     # One folder per month: a deck of several months writes each month's
     # images before rendering any of them, and the file names repeat.
-    period.write_images(proc.get("top5"), os.path.join(DECK_IMAGES, month))
+    period.write_images(proc.get("top5"), os.path.join(DECK_IMAGES, month),
+                        every=proc.get("all"))
 
     # Commentary written for this very month travels with it. Hand-written
     # prose does not: build_slides.py gates that on AUTHORED_MONTH itself, and
@@ -592,7 +593,7 @@ def run_deck(job):
             label = "claude" if P.get("analysis") else "no-ai"
         else:
             P = period.combine(group, payloads, _owned(group))
-            period.write_images(P["top5"], img_dir)
+            period.write_images(P["top5"], img_dir, every=P.get("all"))
             with open(work, "w", encoding="utf-8") as f:
                 json.dump(P, f, ensure_ascii=False)
 
