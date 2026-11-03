@@ -97,6 +97,24 @@ python3 build_slides.py
 python3 build_dashboard.py
 ```
 
+## เพจที่ Agency Intelligence ไม่มี
+
+รายชื่อแบรนด์ของกลุ่มมาจาก Agency Intelligence เป็นหลัก เพจที่ระบบนั้นไม่มี
+(คู่แข่งที่ไม่ใช่ลูกค้า, เพจที่เพิ่งเพิ่ม) เพิ่มเก็บไว้ที่นี่ได้แทนที่จะต้องไปแก้ต้นทางก่อน
+
+```bash
+curl -X POST "$URL/api/groups/<group>/extra-brands" \
+  -H 'Content-Type: application/json' \
+  -d '{"brands":[{"key":"riverpro.th","name":"River Pro",
+                  "url":"https://www.facebook.com/riverpro.th"}]}'
+```
+
+เก็บในตาราง `ccr_extra_brands` และ `group_brands()` merge กับของ Agency โดย
+**key ที่ซ้ำกับต้นทางจะไม่ทับของต้นทาง** รายการที่ส่งมาแทนที่ของเดิมทั้งชุด
+ลิงก์ที่ไม่ใช่ `facebook.com` ถูกปฏิเสธ เพราะรายการนี้กำหนดว่า scraper จะไปดึงที่ไหน
+
+เพจที่เพิ่มแล้วโผล่ในหน้าต่างเลือกแบรนด์ตามปกติ ติ๊ก/เอาออกได้จากหน้าเว็บ
+
 ## เลือกเดือนและโหลดข้อมูลใหม่
 
 มุมขวาบนของ dashboard มีปฏิทินเลือกเดือน (📅) และปุ่ม **โหลดข้อมูลใหม่**

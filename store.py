@@ -104,6 +104,14 @@ CREATE TABLE IF NOT EXISTS ccr_selection (
   brands     JSONB NOT NULL DEFAULT '[]'::jsonb,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Pages added here rather than in Agency Intelligence. Whole brand records,
+-- not just keys: there is nowhere else to look them up.
+CREATE TABLE IF NOT EXISTS ccr_extra_brands (
+  group_id   TEXT PRIMARY KEY,
+  brands     JSONB NOT NULL DEFAULT '[]'::jsonb,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 CREATE TABLE IF NOT EXISTS ccr_jobs (
   id          BIGSERIAL PRIMARY KEY,
   group_id    TEXT NOT NULL,
@@ -201,7 +209,7 @@ def _file():
         with open(FALLBACK, encoding="utf-8") as f:
             return json.load(f)
     except Exception:
-        return {"reports": {}, "selection": {}, "jobs": [], "job_seq": 0}
+        return {"reports": {}, "selection": {}, "extras": {}, "jobs": [], "job_seq": 0}
 
 
 def _write_file(blob):
@@ -372,6 +380,42 @@ JOB_COLS = ("id", "group_id", "group_name", "month", "status", "step", "error",
             "cost_usd", "cost_detail", "dismissed", "created_at", "started_at",
             "step_at", "finished_at", "kind", "note", "months", "model", "est_usd", "report")
 _TIMES = ("created_at", "started_at", "step_at", "finished_at")
+
+def save_extras(group_id, brands):
+    """Remember pages added to this group here rather than upstream."""
+    if available():
+        try:
+            with _connect() as con:
+                con.execute(
+                    """INSERT INTO ccr_extra_brands (group_id, brands, updated_at)
+                       VALUES (%s, %s::jsonb, now())
+                       ON CONFLICT (group_id) DO UPDATE
+                         SET brands = EXCLUDED.brands, updated_at = now()""",
+                    (group_id, json.dumps(brands, ensure_ascii=False)),
+                )
+            return
+        except Exception as exc:
+            _degrade(exc)
+    with _LOCK:
+        blob = _file()
+        blob.setdefault("extras", {})[group_id] = brands
+        _write_file(blob)
+
+
+def load_extras(group_id):
+    """Pages added here for this group. [] when there are none."""
+    if available():
+        try:
+            with _connect() as con:
+                cur = con.execute(
+                    "SELECT brands FROM ccr_extra_brands WHERE group_id = %s",
+                    (group_id,))
+                row = cur.fetchone()
+            return (row[0] if row else None) or []
+        except Exception as exc:
+            _degrade(exc)
+    return _file().get("extras", {}).get(group_id) or []
+
 
 
 def _now():

@@ -11,6 +11,8 @@ at again later — Railway's filesystem does not survive a deploy.
     GET  /api/groups               Product Groups, from Agency Intelligence
     GET  /api/groups/<id>/brands   that group's brands, with what is ticked
     POST /api/groups/<id>/brands   remember which brands were ticked
+    POST /api/groups/<id>/extra-brands  pages this group covers that
+                                   Agency Intelligence does not list
     GET  /api/groups/<id>/months   which months already have data
     POST /api/refresh              run the pipeline for one group and month
     GET  /api/status               progress of the current or last run
@@ -208,6 +210,23 @@ def drop_cached_page(group, month):
 
 # ---------------------------------------------------------------------- brands
 
+def group_brands(group):
+    """Every page this group covers: Agency Intelligence's, plus any added here.
+
+    Agency Intelligence stays the source for the brands it knows about. A page
+    it has never heard of — a competitor that is not a client, a page added
+    mid-month — is kept alongside rather than forcing a detour through that
+    system before a report can include it. Keys added here never shadow an
+    upstream one.
+    """
+    brands = list(agency_api.brands(group))
+    known = {b.get("key") for b in brands}
+    for extra in store.load_extras(group):
+        if extra.get("key") and extra.get("key") not in known:
+            brands.append(dict(extra, extra=True))
+    return brands
+
+
 def effective_selection(group, available):
     """The ticked keys that still mean something, or None to mean "all of them".
 
@@ -227,7 +246,7 @@ def effective_selection(group, available):
 
 def selected_brands(group):
     """The brands a refresh would cover: what was ticked, else all of them."""
-    available = agency_api.brands(group)
+    available = group_brands(group)
     live = effective_selection(group, available)
     if live is None:
         return brandset.normalise(available)
@@ -753,7 +772,7 @@ def processed_from_payload(group, month, payload):
     Agency Intelligence, live — the pin may well have moved since.
     """
     try:
-        owned = {b["key"] for b in agency_api.brands(group) if b.get("owned")}
+        owned = {b["key"] for b in group_brands(group) if b.get("owned")}
     except agency_api.AgencyError:
         owned = set()
     return {
@@ -1002,7 +1021,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if route.endswith("/brands") and "/api/groups/" in route:
             group = urllib.parse.unquote(route.split("/api/groups/")[1].rsplit("/brands", 1)[0])
             try:
-                available = agency_api.brands(group)
+                available = group_brands(group)
             except agency_api.AgencyError as exc:
                 self._json(502, {"error": str(exc)}); return
             picked = effective_selection(group, available)
@@ -1106,6 +1125,44 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 self._json(400, {"error": "ต้องเลือกอย่างน้อยหนึ่งแบรนด์"}); return
             store.save_selection(group, [str(k) for k in keys])
             self._json(200, {"saved": True, "brands": len(keys)})
+            return
+
+        if route.endswith("/extra-brands") and "/api/groups/" in route:
+            group = urllib.parse.unquote(
+                route.split("/api/groups/")[1].rsplit("/extra-brands", 1)[0])
+            try:
+                wanted = self._body().get("brands")
+            except Exception:
+                self._json(400, {"error": "อ่านคำขอไม่สำเร็จ"}); return
+            if not isinstance(wanted, list):
+                self._json(400, {"error": "ต้องส่งรายการแบรนด์มาเป็น list"}); return
+            try:
+                upstream = {b.get("key") for b in agency_api.brands(group)}
+            except agency_api.AgencyError:
+                upstream = set()
+            clean, rejected = [], []
+            for b in wanted:
+                if not isinstance(b, dict):
+                    continue
+                key = str(b.get("key") or "").strip()
+                url = str(b.get("url") or "").strip()
+                # Only Facebook pages: this list decides what gets scraped, and
+                # a stray host would send the scraper somewhere nobody asked for.
+                host = urllib.parse.urlparse(url).netloc.lower().split(":")[0]
+                if not key or not url:
+                    rejected.append({"key": key or "(ไม่มี key)", "why": "ต้องมีทั้ง key และ url"})
+                elif not (host == "facebook.com" or host.endswith(".facebook.com")):
+                    rejected.append({"key": key, "why": "ไม่ใช่ลิงก์ facebook.com"})
+                elif key in upstream:
+                    rejected.append({"key": key, "why": "มีอยู่ใน Agency Intelligence แล้ว"})
+                else:
+                    clean.append({"key": key,
+                                  "name": str(b.get("name") or key).strip(),
+                                  "url": url,
+                                  "owned": bool(b.get("owned"))})
+            store.save_extras(group, clean)
+            self._json(200, {"saved": True, "brands": len(clean),
+                             "rejected": rejected})
             return
 
         if route.endswith("/api/analyse"):
