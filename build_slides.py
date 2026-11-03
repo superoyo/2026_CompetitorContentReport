@@ -389,8 +389,8 @@ for key in ORDER:
             add_text(sl, 1.32, 0.46, 9.5, 0.5, display, size=23, color=WHITE,
                      bold=True, font=HEAD_FONT)
             add_text(sl, 1.32, 0.98, 10.5, 0.4,
-                     "คอนเทนต์ทั้งหมดในเดือน%s %d · %d โพสต์%s"
-                     % (M['th_full'], M['be_year'], len(posts),
+                     "คอนเทนต์ทั้งหมดใน%s · %d โพสต์%s"
+                     % (IN_SPAN, len(posts),
                         "  (ต่อ %d)" % part if part > 1 else ""),
                      size=12, color=hx('#9FC9DE'))
             return sl

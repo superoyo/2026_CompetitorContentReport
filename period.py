@@ -66,6 +66,10 @@ def combine(group, payloads, owned=()):
     # Every post of the span (for the Analysis Report), and each page's
     # follower count as recorded with each month.
     allposts, followers, seq = {}, {}, 0
+    # The same posts again, but only what the deck's contact sheet draws with.
+    # Kept apart from `allposts` because that one goes into the model's brief,
+    # where an inlined image would be dead weight.
+    sheet = {}
     for m in months:
         for row in payloads[m].get("mo") or []:
             if row.get("fans"):
@@ -100,6 +104,10 @@ def combine(group, payloads, owned=()):
                     q[f] = _num(q.get(f))
                 q.update(id="p%d" % seq, month=m, brand=k)
                 allposts.setdefault(k, []).append(q)
+                sheet.setdefault(k, []).append({
+                    "time": post.get("time"), "media_type": post.get("media_type"),
+                    "thumb": post.get("thumb"),
+                    "thumb_w": post.get("w"), "thumb_h": post.get("h")})
         tot["avg"] = round(tot["total"] / tot["posts"], 1) if tot["posts"] else 0
         agg[k] = tot
 
@@ -129,6 +137,7 @@ def combine(group, payloads, owned=()):
         "top5": top5,
         "monthly": monthly,
         "posts": allposts,
+        "all": sheet,
         "followers": followers,
         "period": labels(months),
     }
